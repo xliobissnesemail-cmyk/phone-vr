@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<body style="margin:0; overflow:hidden; background:black;">
+<video id="cam" autoplay playsinline style="width:100%;"></video>
+<canvas id="view" width="640" height="480"></canvas>
+
+<script>
+const video = document.getElementById("cam");
+const canvas = document.getElementById("view");
+const ctx = canvas.getContext("2d");
+
+navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+  .then(stream => {
+    video.srcObject = stream;
+  })
+  .catch(err => {
+    ctx.fillStyle = "red";
+    ctx.font = "20px Arial";
+    ctx.fillText("Camera error: " + err.name, 10, 30);
+  });
+
+let lastFrame = null;
+
+function track() {
+  if (video.readyState === 4) {
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    let frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+    if (lastFrame) {
+      let movement = 0;
+      for (let i = 0; i < frame.data.length; i += 4 * 500) {
+        movement += Math.abs(frame.data[i] - lastFrame.data[i]);
+      }
+
+      ctx.fillStyle = "lime";
+      ctx.font = "20px Arial";
+      ctx.fillText("Movement: " + movement.toFixed(0), 10, 30);
+    }
+
+    lastFrame = frame;
+  }
+  requestAnimationFrame(track);
+}
+
+track();
+</script>
+</body>
+</html>
