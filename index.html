@@ -1,140 +1,147 @@
 <!DOCTYPE html>
 <html>
 <head>
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>Stable VR Viewer</title>
-<style>
-  body {
-    margin: 0;
-    overflow: hidden;
-    background: black;
-    color: white;
-    font-family: Arial;
-  }
-  #view {
-    width: 100vw;
-    height: 100vh;
-    display: block;
-  }
-  #ui {
-    position: fixed;
-    top: 10px;
-    left: 10px;
-    background: rgba(0,0,0,0.5);
-    padding: 8px 12px;
-    border-radius: 6px;
-    z-index: 10;
-  }
-</style>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>VR Hand Tracking</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: black;
+      color: white;
+      font-family: Arial, sans-serif;
+    }
+    #view {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+    }
+    #ui {
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      z-index: 10;
+      background: rgba(0,0,0,0.6);
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 14px;
+    }
+  </style>
 </head>
 <body>
+  <div id="ui">
+    <div>VR Hand Tracking</div>
+    <div id="status">Initializing…</div>
+  </div>
+  <canvas id="view" width="1280" height="720"></canvas>
 
-<div id="ui">
-  <div>Stable VR Hybrid Tracking</div>
-  <div id="status">Loading…</div>
-</div>
+  <!-- MediaPipe Hands -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
 
-<canvas id="view" width="1280" height="720"></canvas>
+  <script>
+    const canvas = document.getElementById("view");
+    const ctx = canvas.getContext("2d");
+    const statusEl = document.getElementById("status");
 
-<script>
-const canvas = document.getElementById("view");
-const ctx = canvas.getContext("2d");
-const statusEl = document.getElementById("status");
+    // Camera video element
+    const video = document.createElement("video");
+    video.setAttribute("playsinline", "");
+    video.setAttribute("autoplay", "");
+    video.style.display = "none";
+    document.body.appendChild(video);
 
-// --- CAMERA SETUP ---
-const video = document.createElement("video");
-video.setAttribute("playsinline", "");
-video.setAttribute("autoplay", "");
-video.style.display = "none";
-document.body.appendChild(video);
+    // Get camera
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+      .then(stream => {
+        video.srcObject = stream;
+        statusEl.textContent = "Camera OK — starting hand tracking…";
+      })
+      .catch(err => {
+        statusEl.textContent = "Camera error: " + err.name;
+      });
 
-navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
-  .then(stream => {
-    video.srcObject = stream;
-    statusEl.textContent = "Camera OK — enabling motion sensors…";
-  })
-  .catch(err => {
-    statusEl.textContent = "Camera error: " + err.name;
-  });
-
-// --- MOTION SENSORS ---
-let sensorYaw = 0;
-let sensorPitch = 0;
-let sensorRoll = 0;
-
-function requestSensorPermission() {
-  if (typeof DeviceOrientationEvent !== "undefined" &&
-      typeof DeviceOrientationEvent.requestPermission === "function") {
-
-    DeviceOrientationEvent.requestPermission().then(response => {
-      if (response === "granted") {
-        window.addEventListener("deviceorientation", handleOrientation);
-        statusEl.textContent = "Camera + Motion sensors active";
-      } else {
-        statusEl.textContent = "Motion sensor permission denied";
+    // MediaPipe Hands setup
+    const hands = new Hands({
+      locateFile: (file) => {
+        return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
       }
     });
 
-  } else {
-    window.addEventListener("deviceorientation", handleOrientation);
-    statusEl.textContent = "Camera + Motion sensors active";
-  }
-}
+    hands.setOptions({
+      maxNumHands: 2,
+      modelComplexity: 1,
+      minDetectionConfidence: 0.7,
+      minTrackingConfidence: 0.7
+    });
 
-function handleOrientation(event) {
-  sensorYaw   = (event.alpha || 0) * (Math.PI / 180);
-  sensorPitch = (event.beta  || 0) * (Math.PI / 180);
-  sensorRoll  = (event.gamma || 0) * (Math.PI / 180);
-}
+    hands.onResults(onHandsResults);
 
-setTimeout(requestSensorPermission, 1000);
+    // MediaPipe camera helper
+    const mpCamera = new Camera(video, {
+      onFrame: async () => {
+        await hands.send({ image: video });
+      },
+      width: 1280,
+      height: 720
+    });
 
-// --- VIRTUAL CAMERA (NO ROTATION APPLIED TO VIDEO) ---
-let vrYaw = 0;
-let vrPitch = 0;
-let vrRoll = 0;
+    mpCamera.start();
 
-function updateVirtualCamera() {
-  const smooth = 0.1;
+    function onHandsResults(results) {
+      const width = canvas.width;
+      const height = canvas.height;
+      const half = width / 2;
 
-  vrYaw   += (sensorYaw   - vrYaw)   * smooth;
-  vrPitch += (sensorPitch - vrPitch) * smooth;
-  vrRoll  += (sensorRoll  - vrRoll)  * smooth;
+      // Draw split-screen video
+      ctx.clearRect(0, 0, width, height);
 
-  // Clamp pitch to avoid flipping
-  const maxPitch = Math.PI / 3;
-  vrPitch = Math.max(-maxPitch, Math.min(maxPitch, vrPitch));
-}
+      if (results.image) {
+        ctx.drawImage(results.image, 0, 0, half, height);
+        ctx.drawImage(results.image, half, 0, half, height);
+      }
 
-// --- RENDER SPLIT SCREEN (NO ROTATION) ---
-function renderVR() {
-  updateVirtualCamera();
+      // Draw hand outlines on top
+      if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = "cyan";
+        ctx.fillStyle = "white";
 
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+        for (const landmarks of results.multiHandLandmarks) {
+          // Draw on full canvas (centered)
+          drawHandOutline(landmarks, width, height);
+        }
+      }
 
-  const halfWidth = canvas.width / 2;
-  const height = canvas.height;
+      statusEl.textContent = "Hand tracking active";
+    }
 
-  if (video.readyState === 4) {
-    // Left eye
-    ctx.drawImage(video, 0, 0, halfWidth, height);
+    function drawHandOutline(landmarks, width, height) {
+      // landmarks are normalized [0..1]
+      // We’ll draw simple lines between key points
+      ctx.beginPath();
+      for (let i = 0; i < landmarks.length; i++) {
+        const x = landmarks[i].x * width;
+        const y = landmarks[i].y * height;
+        if (i === 0) {
+          ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
+      }
+      ctx.closePath();
+      ctx.stroke();
 
-    // Right eye
-    ctx.drawImage(video, halfWidth, 0, halfWidth, height);
-  }
-
-  // Debug overlay
-  ctx.fillStyle = "lime";
-  ctx.font = "16px Arial";
-  ctx.fillText("Yaw: " + vrYaw.toFixed(2), 20, 30);
-  ctx.fillText("Pitch: " + vrPitch.toFixed(2), 20, 50);
-  ctx.fillText("Roll: " + vrRoll.toFixed(2), 20, 70);
-
-  requestAnimationFrame(renderVR);
-}
-
-renderVR();
-</script>
-
+      // Draw small circles at each landmark
+      for (let i = 0; i < landmarks.length; i++) {
+        const x = landmarks[i].x * width;
+        const y = landmarks[i].y * height;
+        ctx.beginPath();
+        ctx.arc(x, y, 4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  </script>
 </body>
 </html>
