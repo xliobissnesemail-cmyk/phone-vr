@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>VR Hand Tracking</title>
+  <title>VR Hand Tracking (Mobile Fixed)</title>
   <style>
     body {
       margin: 0;
@@ -33,6 +33,7 @@
     <div>VR Hand Tracking</div>
     <div id="status">Initializing…</div>
   </div>
+
   <canvas id="view" width="1280" height="720"></canvas>
 
   <!-- MediaPipe Hands -->
@@ -45,24 +46,37 @@
     const ctx = canvas.getContext("2d");
     const statusEl = document.getElementById("status");
 
-    // Camera video element
+    // ------------------------------
+    // CAMERA SETUP (Fix #1 applied)
+    // ------------------------------
     const video = document.createElement("video");
     video.setAttribute("playsinline", "");
     video.setAttribute("autoplay", "");
-    video.style.display = "none";
+    video.muted = true; // required for mobile autoplay
+
+    // Fix #1: video must NOT be display:none
+    video.style.position = "absolute";
+    video.style.opacity = "0";
+    video.style.pointerEvents = "none";
+    video.style.width = "1px";
+    video.style.height = "1px";
+
     document.body.appendChild(video);
 
-    // Get camera
-    navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
-      .then(stream => {
-        video.srcObject = stream;
-        statusEl.textContent = "Camera OK — starting hand tracking…";
-      })
-      .catch(err => {
-        statusEl.textContent = "Camera error: " + err.name;
-      });
+    navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "environment" }
+    })
+    .then(stream => {
+      video.srcObject = stream;
+      statusEl.textContent = "Camera OK — starting hand tracking…";
+    })
+    .catch(err => {
+      statusEl.textContent = "Camera error: " + err.name;
+    });
 
-    // MediaPipe Hands setup
+    // ------------------------------
+    // MEDIAPIPE HAND TRACKING
+    // ------------------------------
     const hands = new Hands({
       locateFile: (file) => {
         return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
@@ -83,12 +97,15 @@
       onFrame: async () => {
         await hands.send({ image: video });
       },
-      width: 1280,
-      height: 720
+      width: 640,   // FIX: lower resolution for mobile
+      height: 480
     });
 
     mpCamera.start();
 
+    // ------------------------------
+    // DRAW HAND OUTLINES
+    // ------------------------------
     function onHandsResults(results) {
       const width = canvas.width;
       const height = canvas.height;
@@ -102,14 +119,13 @@
         ctx.drawImage(results.image, half, 0, half, height);
       }
 
-      // Draw hand outlines on top
-      if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+      // Draw hand outlines
+      if (results.multiHandLandmarks) {
         ctx.lineWidth = 4;
         ctx.strokeStyle = "cyan";
         ctx.fillStyle = "white";
 
         for (const landmarks of results.multiHandLandmarks) {
-          // Draw on full canvas (centered)
           drawHandOutline(landmarks, width, height);
         }
       }
@@ -118,22 +134,17 @@
     }
 
     function drawHandOutline(landmarks, width, height) {
-      // landmarks are normalized [0..1]
-      // We’ll draw simple lines between key points
       ctx.beginPath();
       for (let i = 0; i < landmarks.length; i++) {
         const x = landmarks[i].x * width;
         const y = landmarks[i].y * height;
-        if (i === 0) {
-          ctx.moveTo(x, y);
-        } else {
-          ctx.lineTo(x, y);
-        }
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
       }
       ctx.closePath();
       ctx.stroke();
 
-      // Draw small circles at each landmark
+      // Draw circles at each landmark
       for (let i = 0; i < landmarks.length; i++) {
         const x = landmarks[i].x * width;
         const y = landmarks[i].y * height;
