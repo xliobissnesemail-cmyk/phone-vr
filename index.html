@@ -26,13 +26,24 @@
       border-radius: 6px;
       font-size: 14px;
     }
+    #startBtn {
+      position: fixed;
+      bottom: 20px;
+      left: 20px;
+      opacity: 0;        /* invisible */
+      pointer-events: auto;
+      z-index: 999;
+    }
   </style>
 </head>
 <body>
   <div id="ui">
     <div>VR Hand Tracking</div>
-    <div id="status">Initializing…</div>
+    <div id="status">Tap screen to start camera…</div>
   </div>
+
+  <!-- Hidden start button -->
+  <button id="startBtn">Start Camera</button>
 
   <canvas id="view" width="1280" height="720"></canvas>
 
@@ -47,31 +58,49 @@
     const statusEl = document.getElementById("status");
 
     // ------------------------------
-    // CAMERA SETUP (Fix #1 applied)
+    // CAMERA SETUP (Mobile Safe)
     // ------------------------------
     const video = document.createElement("video");
     video.setAttribute("playsinline", "");
     video.setAttribute("autoplay", "");
     video.muted = true; // required for mobile autoplay
 
-    // Fix #1: video must NOT be display:none
+    // Mobile-safe invisible video element
     video.style.position = "absolute";
-    video.style.opacity = "0";
+    video.style.top = "0";
+    video.style.left = "0";
+    video.style.width = "320px";   // real size required
+    video.style.height = "240px";  // real size required
+    video.style.opacity = "0";     // invisible
     video.style.pointerEvents = "none";
-    video.style.width = "1px";
-    video.style.height = "1px";
 
     document.body.appendChild(video);
 
-    navigator.mediaDevices.getUserMedia({
-      video: { facingMode: "environment" }
-    })
-    .then(stream => {
-      video.srcObject = stream;
-      statusEl.textContent = "Camera OK — starting hand tracking…";
-    })
-    .catch(err => {
-      statusEl.textContent = "Camera error: " + err.name;
+    // ------------------------------
+    // Hidden Start Button (Fix)
+    // ------------------------------
+    const startBtn = document.getElementById("startBtn");
+
+    startBtn.onclick = async () => {
+      statusEl.textContent = "Starting camera…";
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "environment" }
+        });
+
+        video.srcObject = stream;
+        statusEl.textContent = "Camera OK — starting hand tracking…";
+
+        mpCamera.start();
+      } catch (err) {
+        statusEl.textContent = "Camera error: " + err.name;
+      }
+    };
+
+    // Auto-trigger hidden button when user taps screen
+    document.body.addEventListener("click", () => {
+      startBtn.click();
     });
 
     // ------------------------------
@@ -97,11 +126,9 @@
       onFrame: async () => {
         await hands.send({ image: video });
       },
-      width: 640,   // FIX: lower resolution for mobile
+      width: 640,   // mobile-safe resolution
       height: 480
     });
-
-    mpCamera.start();
 
     // ------------------------------
     // DRAW HAND OUTLINES
