@@ -64,17 +64,14 @@
       let sensorYaw = 0;
       let sensorPitch = 0;
       let sensorRoll = 0;
-      let hasSensors = false;
 
       function requestSensorPermission() {
         if (typeof DeviceOrientationEvent !== "undefined" &&
             typeof DeviceOrientationEvent.requestPermission === "function") {
-          // iOS style permission
           DeviceOrientationEvent.requestPermission()
             .then(response => {
               if (response === "granted") {
                 window.addEventListener("deviceorientation", handleOrientation);
-                hasSensors = true;
                 statusEl.textContent = "Camera + Motion sensors active";
               } else {
                 statusEl.textContent = "Motion sensor permission denied";
@@ -84,24 +81,20 @@
               statusEl.textContent = "Motion sensor permission error";
             });
         } else {
-          // Android / desktop style
           window.addEventListener("deviceorientation", handleOrientation);
-          hasSensors = true;
           statusEl.textContent = "Camera + Motion sensors active";
         }
       }
 
       function handleOrientation(event) {
-        // alpha: 0–360 (yaw), beta: -180–180 (pitch), gamma: -90–90 (roll)
-        sensorYaw = (event.alpha || 0) * (Math.PI / 180);
-        sensorPitch = (event.beta || 0) * (Math.PI / 180);
-        sensorRoll = (event.gamma || 0) * (Math.PI / 180);
+        sensorYaw   = (event.alpha || 0) * (Math.PI / 180);
+        sensorPitch = (event.beta  || 0) * (Math.PI / 180);
+        sensorRoll  = (event.gamma || 0) * (Math.PI / 180);
       }
 
-      // Ask for motion permission shortly after load
       setTimeout(requestSensorPermission, 1000);
 
-      // --- CAMERA-BASED TRACKING (simple optical flow-ish) ---
+      // --- CAMERA-BASED TRACKING (simple brightness-based) ---
       function getFeatures(frame) {
         const features = [];
         for (let i = 0; i < frame.data.length; i += 4 * 400) {
@@ -130,11 +123,9 @@
               pitchSum += diff * 0.5;
             }
 
-            // Convert brightness changes into small rotation deltas
-            camYaw += yawSum * 0.000002;
+            camYaw   += yawSum   * 0.000002;
             camPitch += pitchSum * 0.000002;
 
-            // Clamp camera-based pitch so it doesn't go crazy
             camPitch = Math.max(-0.6, Math.min(0.6, camPitch));
           }
 
@@ -146,33 +137,29 @@
 
       updateCameraTracking();
 
-      // --- VR CAMERA STATE (hybrid: sensors + camera) ---
+      // --- VR STATE (hybrid: sensors + camera) ---
       let vrYaw = 0;
       let vrPitch = 0;
       let vrRoll = 0;
 
       function updateVRState() {
-        // Base from sensors
-        let targetYaw = sensorYaw;
-        let targetPitch = sensorPitch * 0.5; // reduce pitch sensitivity
-        let targetRoll = sensorRoll * 0.5;
+        let targetYaw   = sensorYaw;
+        let targetPitch = sensorPitch * 0.5;
+        let targetRoll  = sensorRoll * 0.5;
 
-        // Add camera-based tracking as subtle extra motion
-        targetYaw += camYaw;
+        targetYaw   += camYaw;
         targetPitch += camPitch;
 
-        // Smooth (lerp) towards target
         const smooth = 0.1;
-        vrYaw += (targetYaw - vrYaw) * smooth;
+        vrYaw   += (targetYaw   - vrYaw)   * smooth;
         vrPitch += (targetPitch - vrPitch) * smooth;
-        vrRoll += (targetRoll - vrRoll) * smooth;
+        vrRoll  += (targetRoll  - vrRoll)  * smooth;
 
-        // Clamp pitch to avoid flipping
-        const maxPitch = Math.PI / 3; // ~60 degrees
+        const maxPitch = Math.PI / 3;
         vrPitch = Math.max(-maxPitch, Math.min(maxPitch, vrPitch));
       }
 
-      // --- RENDER SPLIT-SCREEN VR VIEW ---
+      // --- RENDER SPLIT-SCREEN VR VIEW (no canvas rotation) ---
       function renderVR() {
         updateVRState();
 
@@ -181,36 +168,23 @@
         const halfWidth = canvas.width / 2;
         const height = canvas.height;
 
-        // Draw camera frame once to an offscreen buffer
-        // (we already drew in tracking, but we’ll redraw cleanly here)
         if (video.readyState === 4) {
           // Left eye
-          ctx.save();
-          ctx.translate(halfWidth / 2, height / 2);
-          ctx.rotate(vrYaw * 0.2);   // small rotation for effect
-          ctx.translate(-halfWidth / 2, -height / 2);
           ctx.drawImage(video, 0, 0, halfWidth, height);
-          ctx.restore();
-
           // Right eye
-          ctx.save();
-          ctx.translate(halfWidth + halfWidth / 2, height / 2);
-          ctx.rotate(vrYaw * 0.2);
-          ctx.translate(-halfWidth - halfWidth / 2, -height / 2);
           ctx.drawImage(video, halfWidth, 0, halfWidth, height);
-          ctx.restore();
         } else {
           ctx.fillStyle = "white";
           ctx.font = "24px Arial";
           ctx.fillText("Waiting for camera...", 40, 60);
         }
 
-        // Overlay debug info
+        // Debug overlay
         ctx.fillStyle = "lime";
         ctx.font = "16px Arial";
-        ctx.fillText("Yaw: " + vrYaw.toFixed(2), 20, 30);
+        ctx.fillText("Yaw: "   + vrYaw.toFixed(2),   20, 30);
         ctx.fillText("Pitch: " + vrPitch.toFixed(2), 20, 50);
-        ctx.fillText("Roll: " + vrRoll.toFixed(2), 20, 70);
+        ctx.fillText("Roll: "  + vrRoll.toFixed(2),  20, 70);
 
         requestAnimationFrame(renderVR);
       }
