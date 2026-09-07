@@ -1,195 +1,140 @@
 <!DOCTYPE html>
 <html>
-  <head>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Phone VR Hybrid Tracking</title>
-    <style>
-      body {
-        margin: 0;
-        overflow: hidden;
-        background: black;
-        color: white;
-        font-family: Arial, sans-serif;
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Stable VR Viewer</title>
+<style>
+  body {
+    margin: 0;
+    overflow: hidden;
+    background: black;
+    color: white;
+    font-family: Arial;
+  }
+  #view {
+    width: 100vw;
+    height: 100vh;
+    display: block;
+  }
+  #ui {
+    position: fixed;
+    top: 10px;
+    left: 10px;
+    background: rgba(0,0,0,0.5);
+    padding: 8px 12px;
+    border-radius: 6px;
+    z-index: 10;
+  }
+</style>
+</head>
+<body>
+
+<div id="ui">
+  <div>Stable VR Hybrid Tracking</div>
+  <div id="status">Loading…</div>
+</div>
+
+<canvas id="view" width="1280" height="720"></canvas>
+
+<script>
+const canvas = document.getElementById("view");
+const ctx = canvas.getContext("2d");
+const statusEl = document.getElementById("status");
+
+// --- CAMERA SETUP ---
+const video = document.createElement("video");
+video.setAttribute("playsinline", "");
+video.setAttribute("autoplay", "");
+video.style.display = "none";
+document.body.appendChild(video);
+
+navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+  .then(stream => {
+    video.srcObject = stream;
+    statusEl.textContent = "Camera OK — enabling motion sensors…";
+  })
+  .catch(err => {
+    statusEl.textContent = "Camera error: " + err.name;
+  });
+
+// --- MOTION SENSORS ---
+let sensorYaw = 0;
+let sensorPitch = 0;
+let sensorRoll = 0;
+
+function requestSensorPermission() {
+  if (typeof DeviceOrientationEvent !== "undefined" &&
+      typeof DeviceOrientationEvent.requestPermission === "function") {
+
+    DeviceOrientationEvent.requestPermission().then(response => {
+      if (response === "granted") {
+        window.addEventListener("deviceorientation", handleOrientation);
+        statusEl.textContent = "Camera + Motion sensors active";
+      } else {
+        statusEl.textContent = "Motion sensor permission denied";
       }
-      #ui {
-        position: fixed;
-        top: 10px;
-        left: 10px;
-        z-index: 10;
-        background: rgba(0,0,0,0.6);
-        padding: 8px 12px;
-        border-radius: 6px;
-        font-size: 14px;
-      }
-      #view {
-        display: block;
-        width: 100vw;
-        height: 100vh;
-      }
-    </style>
-  </head>
-  <body>
-    <div id="ui">
-      <div>Phone VR Hybrid Tracking</div>
-      <div id="status">Initializing...</div>
-    </div>
-    <canvas id="view" width="1280" height="720"></canvas>
+    });
 
-    <script>
-      const canvas = document.getElementById("view");
-      const ctx = canvas.getContext("2d");
-      const statusEl = document.getElementById("status");
+  } else {
+    window.addEventListener("deviceorientation", handleOrientation);
+    statusEl.textContent = "Camera + Motion sensors active";
+  }
+}
 
-      // --- CAMERA SETUP ---
-      const video = document.createElement("video");
-      video.setAttribute("playsinline", "");
-      video.setAttribute("autoplay", "");
-      video.style.display = "none";
-      document.body.appendChild(video);
+function handleOrientation(event) {
+  sensorYaw   = (event.alpha || 0) * (Math.PI / 180);
+  sensorPitch = (event.beta  || 0) * (Math.PI / 180);
+  sensorRoll  = (event.gamma || 0) * (Math.PI / 180);
+}
 
-      let lastFrame = null;
-      let camYaw = 0;
-      let camPitch = 0;
+setTimeout(requestSensorPermission, 1000);
 
-      navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
-        .then(stream => {
-          video.srcObject = stream;
-          statusEl.textContent = "Camera OK, waiting for motion sensors...";
-        })
-        .catch(err => {
-          statusEl.textContent = "Camera error: " + err.name;
-        });
+// --- VIRTUAL CAMERA (NO ROTATION APPLIED TO VIDEO) ---
+let vrYaw = 0;
+let vrPitch = 0;
+let vrRoll = 0;
 
-      // --- MOTION SENSORS ---
-      let sensorYaw = 0;
-      let sensorPitch = 0;
-      let sensorRoll = 0;
+function updateVirtualCamera() {
+  const smooth = 0.1;
 
-      function requestSensorPermission() {
-        if (typeof DeviceOrientationEvent !== "undefined" &&
-            typeof DeviceOrientationEvent.requestPermission === "function") {
-          DeviceOrientationEvent.requestPermission()
-            .then(response => {
-              if (response === "granted") {
-                window.addEventListener("deviceorientation", handleOrientation);
-                statusEl.textContent = "Camera + Motion sensors active";
-              } else {
-                statusEl.textContent = "Motion sensor permission denied";
-              }
-            })
-            .catch(() => {
-              statusEl.textContent = "Motion sensor permission error";
-            });
-        } else {
-          window.addEventListener("deviceorientation", handleOrientation);
-          statusEl.textContent = "Camera + Motion sensors active";
-        }
-      }
+  vrYaw   += (sensorYaw   - vrYaw)   * smooth;
+  vrPitch += (sensorPitch - vrPitch) * smooth;
+  vrRoll  += (sensorRoll  - vrRoll)  * smooth;
 
-      function handleOrientation(event) {
-        sensorYaw   = (event.alpha || 0) * (Math.PI / 180);
-        sensorPitch = (event.beta  || 0) * (Math.PI / 180);
-        sensorRoll  = (event.gamma || 0) * (Math.PI / 180);
-      }
+  // Clamp pitch to avoid flipping
+  const maxPitch = Math.PI / 3;
+  vrPitch = Math.max(-maxPitch, Math.min(maxPitch, vrPitch));
+}
 
-      setTimeout(requestSensorPermission, 1000);
+// --- RENDER SPLIT SCREEN (NO ROTATION) ---
+function renderVR() {
+  updateVirtualCamera();
 
-      // --- CAMERA-BASED TRACKING (simple brightness-based) ---
-      function getFeatures(frame) {
-        const features = [];
-        for (let i = 0; i < frame.data.length; i += 4 * 400) {
-          const r = frame.data[i];
-          const g = frame.data[i + 1];
-          const b = frame.data[i + 2];
-          const brightness = r + g + b;
-          if (brightness > 200) features.push(i);
-        }
-        return features;
-      }
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      function updateCameraTracking() {
-        if (video.readyState === 4) {
-          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-          let frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const halfWidth = canvas.width / 2;
+  const height = canvas.height;
 
-          if (lastFrame) {
-            let features = getFeatures(frame);
-            let yawSum = 0;
-            let pitchSum = 0;
+  if (video.readyState === 4) {
+    // Left eye
+    ctx.drawImage(video, 0, 0, halfWidth, height);
 
-            for (let f of features) {
-              let diff = frame.data[f] - lastFrame.data[f];
-              yawSum += diff;
-              pitchSum += diff * 0.5;
-            }
+    // Right eye
+    ctx.drawImage(video, halfWidth, 0, halfWidth, height);
+  }
 
-            camYaw   += yawSum   * 0.000002;
-            camPitch += pitchSum * 0.000002;
+  // Debug overlay
+  ctx.fillStyle = "lime";
+  ctx.font = "16px Arial";
+  ctx.fillText("Yaw: " + vrYaw.toFixed(2), 20, 30);
+  ctx.fillText("Pitch: " + vrPitch.toFixed(2), 20, 50);
+  ctx.fillText("Roll: " + vrRoll.toFixed(2), 20, 70);
 
-            camPitch = Math.max(-0.6, Math.min(0.6, camPitch));
-          }
+  requestAnimationFrame(renderVR);
+}
 
-          lastFrame = frame;
-        }
+renderVR();
+</script>
 
-        requestAnimationFrame(updateCameraTracking);
-      }
-
-      updateCameraTracking();
-
-      // --- VR STATE (hybrid: sensors + camera) ---
-      let vrYaw = 0;
-      let vrPitch = 0;
-      let vrRoll = 0;
-
-      function updateVRState() {
-        let targetYaw   = sensorYaw;
-        let targetPitch = sensorPitch * 0.5;
-        let targetRoll  = sensorRoll * 0.5;
-
-        targetYaw   += camYaw;
-        targetPitch += camPitch;
-
-        const smooth = 0.1;
-        vrYaw   += (targetYaw   - vrYaw)   * smooth;
-        vrPitch += (targetPitch - vrPitch) * smooth;
-        vrRoll  += (targetRoll  - vrRoll)  * smooth;
-
-        const maxPitch = Math.PI / 3;
-        vrPitch = Math.max(-maxPitch, Math.min(maxPitch, vrPitch));
-      }
-
-      // --- RENDER SPLIT-SCREEN VR VIEW (no canvas rotation) ---
-      function renderVR() {
-        updateVRState();
-
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-        const halfWidth = canvas.width / 2;
-        const height = canvas.height;
-
-        if (video.readyState === 4) {
-          // Left eye
-          ctx.drawImage(video, 0, 0, halfWidth, height);
-          // Right eye
-          ctx.drawImage(video, halfWidth, 0, halfWidth, height);
-        } else {
-          ctx.fillStyle = "white";
-          ctx.font = "24px Arial";
-          ctx.fillText("Waiting for camera...", 40, 60);
-        }
-
-        // Debug overlay
-        ctx.fillStyle = "lime";
-        ctx.font = "16px Arial";
-        ctx.fillText("Yaw: "   + vrYaw.toFixed(2),   20, 30);
-        ctx.fillText("Pitch: " + vrPitch.toFixed(2), 20, 50);
-        ctx.fillText("Roll: "  + vrRoll.toFixed(2),  20, 70);
-
-        requestAnimationFrame(renderVR);
-      }
-
-      renderVR();
-    </script>
-  </body>
+</body>
 </html>
