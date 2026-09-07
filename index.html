@@ -1,185 +1,22 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>VR Hand Tracking (Mobile Fixed)</title>
-  <style>
-    body {
-      margin: 0;
-      overflow: hidden;
-      background: black;
-      color: white;
-      font-family: Arial, sans-serif;
-    }
-    #view {
-      display: block;
-      width: 100vw;
-      height: 100vh;
-    }
-    #ui {
-      position: fixed;
-      top: 10px;
-      left: 10px;
-      z-index: 10;
-      background: rgba(0,0,0,0.6);
-      padding: 8px 12px;
-      border-radius: 6px;
-      font-size: 14px;
-    }
-    #startBtn {
-      position: fixed;
-      bottom: 20px;
-      left: 20px;
-      opacity: 0;        /* invisible */
-      pointer-events: auto;
-      z-index: 999;
-    }
-  </style>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Camera Test</title>
 </head>
 <body>
-  <div id="ui">
-    <div>VR Hand Tracking</div>
-    <div id="status">Tap screen to start camera…</div>
-  </div>
-
-  <!-- Hidden start button -->
-  <button id="startBtn">Start Camera</button>
-
-  <canvas id="view" width="1280" height="720"></canvas>
-
-  <!-- MediaPipe Hands -->
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
-
+  <video id="v" autoplay playsinline style="width:100vw;height:100vh;background:black;"></video>
   <script>
-    const canvas = document.getElementById("view");
-    const ctx = canvas.getContext("2d");
-    const statusEl = document.getElementById("status");
+    const v = document.getElementById("v");
+    v.muted = true;
 
-    // ------------------------------
-    // CAMERA SETUP (Mobile Safe)
-    // ------------------------------
-    const video = document.createElement("video");
-    video.setAttribute("playsinline", "");
-    video.setAttribute("autoplay", "");
-    video.muted = true; // required for mobile autoplay
-
-    // Mobile-safe invisible video element
-    video.style.position = "absolute";
-    video.style.top = "0";
-    video.style.left = "0";
-    video.style.width = "320px";   // real size required
-    video.style.height = "240px";  // real size required
-    video.style.opacity = "0";     // invisible
-    video.style.pointerEvents = "none";
-
-    document.body.appendChild(video);
-
-    // ------------------------------
-    // Hidden Start Button (Fix)
-    // ------------------------------
-    const startBtn = document.getElementById("startBtn");
-
-    startBtn.onclick = async () => {
-      statusEl.textContent = "Starting camera…";
-
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "environment" }
-        });
-
-        video.srcObject = stream;
-        statusEl.textContent = "Camera OK — starting hand tracking…";
-
-        mpCamera.start();
-      } catch (err) {
-        statusEl.textContent = "Camera error: " + err.name;
-      }
-    };
-
-    // Auto-trigger hidden button when user taps screen
-    document.body.addEventListener("click", () => {
-      startBtn.click();
-    });
-
-    // ------------------------------
-    // MEDIAPIPE HAND TRACKING
-    // ------------------------------
-    const hands = new Hands({
-      locateFile: (file) => {
-        return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
-      }
-    });
-
-    hands.setOptions({
-      maxNumHands: 2,
-      modelComplexity: 1,
-      minDetectionConfidence: 0.7,
-      minTrackingConfidence: 0.7
-    });
-
-    hands.onResults(onHandsResults);
-
-    // MediaPipe camera helper
-    const mpCamera = new Camera(video, {
-      onFrame: async () => {
-        await hands.send({ image: video });
-      },
-      width: 640,   // mobile-safe resolution
-      height: 480
-    });
-
-    // ------------------------------
-    // DRAW HAND OUTLINES
-    // ------------------------------
-    function onHandsResults(results) {
-      const width = canvas.width;
-      const height = canvas.height;
-      const half = width / 2;
-
-      // Draw split-screen video
-      ctx.clearRect(0, 0, width, height);
-
-      if (results.image) {
-        ctx.drawImage(results.image, 0, 0, half, height);
-        ctx.drawImage(results.image, half, 0, half, height);
-      }
-
-      // Draw hand outlines
-      if (results.multiHandLandmarks) {
-        ctx.lineWidth = 4;
-        ctx.strokeStyle = "cyan";
-        ctx.fillStyle = "white";
-
-        for (const landmarks of results.multiHandLandmarks) {
-          drawHandOutline(landmarks, width, height);
-        }
-      }
-
-      statusEl.textContent = "Hand tracking active";
-    }
-
-    function drawHandOutline(landmarks, width, height) {
-      ctx.beginPath();
-      for (let i = 0; i < landmarks.length; i++) {
-        const x = landmarks[i].x * width;
-        const y = landmarks[i].y * height;
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-      }
-      ctx.closePath();
-      ctx.stroke();
-
-      // Draw circles at each landmark
-      for (let i = 0; i < landmarks.length; i++) {
-        const x = landmarks[i].x * width;
-        const y = landmarks[i].y * height;
-        ctx.beginPath();
-        ctx.arc(x, y, 4, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    }
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+      .then(stream => {
+        v.srcObject = stream;
+      })
+      .catch(err => {
+        alert("Error: " + err.name);
+      });
   </script>
 </body>
 </html>
