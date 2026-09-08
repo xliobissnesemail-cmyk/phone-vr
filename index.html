@@ -2,29 +2,30 @@
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>VR MediaPipe Front Camera</title>
+<title>VR MediaPipe Fullscreen Camera</title>
 <style>
   body { margin: 0; overflow: hidden; background: black; }
 
-  #view {
-    width: 100vw;
-    height: 100vh;
-    display: block;
-    position: relative;
-    z-index: 2;
-  }
-
-  /* Tiny visible camera feed */
+  /* FULLSCREEN VIDEO */
   #cam {
     position: fixed;
-    bottom: 10px;
-    right: 10px;
-    width: 80px;
-    height: 60px;
-    z-index: 3;
-    opacity: 0.4; /* must be visible */
-    border: 2px solid white;
-    border-radius: 6px;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    object-fit: cover;
+    z-index: 1; /* video stays visible */
+  }
+
+  /* VR CANVAS ON TOP */
+  #view {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 2; /* canvas draws over video */
+    pointer-events: none;
   }
 
   #hud {
@@ -36,14 +37,14 @@
     border-radius: 6px;
     color: white;
     font-family: Arial;
-    z-index: 4;
+    z-index: 3;
   }
 </style>
 </head>
 <body>
 
 <div id="hud">
-  <div>v6.0.0-mediapipe-frontcam</div>
+  <div>v7.0.0-fullscreen-mediapipe</div>
   <div id="fps">FPS: 0</div>
 </div>
 
@@ -64,7 +65,7 @@ let frames = 0;
 
 document.body.addEventListener("click", async () => {
   const stream = await navigator.mediaDevices.getUserMedia({
-    video: { facingMode: "user" } // FRONT CAMERA FIX
+    video: { facingMode: "environment" }
   });
   video.srcObject = stream;
   startMediaPipe();
@@ -113,7 +114,7 @@ function drawResults(results) {
   const h = canvas.height;
   const half = w / 2;
 
-  // VR split-screen
+  // VR split-screen drawn OVER the video
   ctx.drawImage(video, 0, 0, half, h);
   ctx.drawImage(video, half, 0, half, h);
 
