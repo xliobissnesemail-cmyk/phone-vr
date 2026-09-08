@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>VR Multi-Hand Skeleton Detector</title>
+<title>VR Hybrid Hand Skeleton</title>
 <style>
   body { margin: 0; overflow: hidden; background: black; color: white; font-family: Arial; }
   #view { width: 100vw; height: 100vh; display: block; }
@@ -16,7 +16,7 @@
 <body>
 
 <div id="hud">
-  <div id="version">v3.0.0-multi-hand-skeleton</div>
+  <div id="version">v4.0.0-hybrid-hand-skeleton</div>
   <div id="fps">FPS: 0</div>
 </div>
 
@@ -27,7 +27,7 @@ const canvas = document.getElementById("view");
 const ctx = canvas.getContext("2d");
 const fpsEl = document.getElementById("fps");
 
-// Camera setup
+// camera
 const video = document.createElement("video");
 video.autoplay = true;
 video.playsInline = true;
@@ -36,16 +36,19 @@ video.style.position = "absolute";
 video.style.opacity = "0";
 document.body.appendChild(video);
 
-// Processing canvas
+// processing canvas
 const proc = document.createElement("canvas");
 proc.width = 320;
 proc.height = 180;
 const pctx = proc.getContext("2d");
 
+let lastFrame = null;
 let lastTime = performance.now();
 let frameCount = 0;
 
-// Start camera on tap
+// keep last skeleton when hand leaves frame
+let lastSkeletons = [];
+
 document.body.addEventListener("click", async () => {
   const stream = await navigator.mediaDevices.getUserMedia({
     video: { facingMode: "environment" }
@@ -78,72 +81,115 @@ function detectHands() {
   const h = canvas.height;
   const half = w / 2;
 
-  // Draw split-screen VR
+  // draw split-screen VR
   ctx.drawImage(video, 0, 0, half, h);
   ctx.drawImage(video, half, 0, half, h);
 
-  // Downscale for processing
+  // downscale for processing
   pctx.drawImage(video, 0, 0, proc.width, proc.height);
   const frame = pctx.getImageData(0, 0, proc.width, proc.height);
   const data = frame.data;
 
-  // Edge detection
-  const edges = [];
-  for (let y = 1; y < proc.height - 1; y++) {
-    for (let x = 1; x < proc.width - 1; x++) {
-      const i = (y * proc.width + x) * 4;
+  if (!lastFrame) {
+    lastFrame = frame;
+    drawSkeletons(lastSkeletons);
+    return;
+  }
 
-      const gx =
-        -data[i - 4] + data[i + 4] +
-        -2 * data[i - 4 * proc.width] + 2 * data[i + 4 * proc.width];
+  const last = lastFrame.data;
+  const mask = new Uint8ClampedArray(proc.width * proc.height);
 
-      const gy =
-        -data[i - 4 * proc.width] - 2 * data[i - 4] +
-         data[i + 4 * proc.width] + 2 * data[i + 4];
+  // hybrid mask: skin + motion
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i], g = data[i+1], b = data[i+2];
+    const lr = last[i], lg = last[i+1], lb = last[i+2];
 
-      const mag = Math.abs(gx) + Math.abs(gy);
+    // motion
+    const diff =
+      Math.abs(r - lr) +
+      Math.abs(g - lg) +
+      Math.abs(b - lb);
 
-      if (mag > 80) edges.push({ x, y });
+    // YCrCb skin
+    const y  = 0.299*r + 0.587*g + 0.114*b;
+    const cr = (r - y) * 0.713 + 128;
+    const cb = (b - y) * 0.564 + 128;
+
+    const isSkin =
+      cr > 135 && cr < 180 &&
+      cb > 85  && cb < 135;
+
+    const idx = i / 4;
+    if (isSkin && diff > 25) {
+      mask[idx] = 255;
+    } else {
+      mask[idx] = 0;
     }
   }
 
-  if (edges.length < 20) return;
+  lastFrame = frame;
 
-  // Cluster edges into multiple blobs (hands)
-  const blobs = clusterPoints(edges, 25);
+  // cluster mask into blobs (multiple hands)
+  const blobs = clusterMask(mask, proc.width, proc.height, 40);
 
-  // For each blob, compute convex hull and draw skeleton
+  const skeletons = [];
+
   for (let blob of blobs) {
-    if (blob.length < 30) continue;
+    if (blob.length < 50) continue;
 
     const hull = convexHull(blob);
-    drawSkeleton(hull);
+    if (hull.length < 5) continue;
+
+    const skeleton = buildSkeleton(hull);
+    skeletons.push(skeleton);
   }
+
+  if (skeletons.length > 0) {
+    lastSkeletons = skeletons;
+  }
+
+  drawSkeletons(lastSkeletons);
 }
 
-function clusterPoints(points, dist) {
-  const clusters = [];
+function clusterMask(mask, w, h, minSize) {
+  const visited = new Uint8ClampedArray(mask.length);
+  const blobs = [];
 
-  for (let p of points) {
-    let found = false;
+  const dirs = [
+    [1,0],[-1,0],[0,1],[0,-1],
+    [1,1],[1,-1],[-1,1],[-1,-1]
+  ];
 
-    for (let c of clusters) {
-      for (let q of c) {
-        const dx = p.x - q.x;
-        const dy = p.y - q.y;
-        if (dx * dx + dy * dy < dist * dist) {
-          c.push(p);
-          found = true;
-          break;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const idx = y * w + x;
+      if (mask[idx] === 255 && !visited[idx]) {
+        const queue = [{x,y}];
+        const blob = [];
+        visited[idx] = 1;
+
+        while (queue.length) {
+          const p = queue.shift();
+          blob.push(p);
+
+          for (let d of dirs) {
+            const nx = p.x + d[0];
+            const ny = p.y + d[1];
+            if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+            const nidx = ny * w + nx;
+            if (mask[nidx] === 255 && !visited[nidx]) {
+              visited[nidx] = 1;
+              queue.push({x:nx,y:ny});
+            }
+          }
         }
-      }
-      if (found) break;
-    }
 
-    if (!found) clusters.push([p]);
+        if (blob.length >= minSize) blobs.push(blob);
+      }
+    }
   }
 
-  return clusters;
+  return blobs;
 }
 
 function convexHull(points) {
@@ -171,11 +217,8 @@ function convexHull(points) {
   return hull;
 }
 
-function drawSkeleton(hull) {
-  const scaleX = canvas.width / proc.width;
-  const scaleY = canvas.height / proc.height;
-
-  // Palm center
+function buildSkeleton(hull) {
+  // palm center
   let cx = 0, cy = 0;
   for (let p of hull) {
     cx += p.x;
@@ -184,34 +227,50 @@ function drawSkeleton(hull) {
   cx /= hull.length;
   cy /= hull.length;
 
-  cx *= scaleX;
-  cy *= scaleY;
+  // pick top N fingertip candidates (furthest from center)
+  const scored = hull.map(p => {
+    const dx = p.x - cx;
+    const dy = p.y - cy;
+    return {p, d: dx*dx + dy*dy};
+  }).sort((a,b) => b.d - a.d);
 
-  // Draw palm center
-  ctx.fillStyle = "yellow";
-  ctx.beginPath();
-  ctx.arc(cx, cy, 10, 0, Math.PI * 2);
-  ctx.fill();
+  const tips = scored.slice(0, 5).map(s => s.p);
 
-  // Draw bones
-  ctx.strokeStyle = "white";
-  ctx.lineWidth = 3;
+  return { palm: {x:cx,y:cy}, tips };
+}
 
-  for (let p of hull) {
-    const x = p.x * scaleX;
-    const y = p.y * scaleY;
+function drawSkeletons(skeletons) {
+  const scaleX = canvas.width / proc.width;
+  const scaleY = canvas.height / proc.height;
 
-    // fingertip
-    ctx.fillStyle = "cyan";
+  for (let s of skeletons) {
+    const cx = s.palm.x * scaleX;
+    const cy = s.palm.y * scaleY;
+
+    // palm
+    ctx.fillStyle = "yellow";
     ctx.beginPath();
-    ctx.arc(x, y, 6, 0, Math.PI * 2);
+    ctx.arc(cx, cy, 10, 0, Math.PI * 2);
     ctx.fill();
 
-    // bone
-    ctx.beginPath();
-    ctx.moveTo(cx, cy);
-    ctx.lineTo(x, y);
-    ctx.stroke();
+    // bones
+    ctx.strokeStyle = "white";
+    ctx.lineWidth = 3;
+
+    for (let tip of s.tips) {
+      const x = tip.x * scaleX;
+      const y = tip.y * scaleY;
+
+      ctx.fillStyle = "cyan";
+      ctx.beginPath();
+      ctx.arc(x, y, 6, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(x, y);
+      ctx.stroke();
+    }
   }
 }
 </script>
