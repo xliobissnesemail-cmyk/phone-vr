@@ -2,274 +2,132 @@
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>VR Hybrid Hand Skeleton</title>
+<title>VR MediaPipe + Visible Camera</title>
 <style>
-  body { margin: 0; overflow: hidden; background: black; color: white; font-family: Arial; }
-  #view { width: 100vw; height: 100vh; display: block; }
+  body { margin: 0; overflow: hidden; background: black; }
+
+  /* VR canvas */
+  #view {
+    width: 100vw;
+    height: 100vh;
+    display: block;
+    position: relative;
+    z-index: 2;
+  }
+
+  /* Tiny visible camera feed */
+  #cam {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 1px;
+    height: 1px;
+    z-index: 1;
+    opacity: 0.01; /* barely visible but NOT zero */
+    pointer-events: none;
+  }
+
   #hud {
-    position: fixed; top: 10px; right: 10px; z-index: 10;
-    background: rgba(0,0,0,0.6); padding: 8px 12px; border-radius: 6px;
-    font-size: 14px; text-align: right;
+    position: fixed;
+    top: 10px;
+    right: 10px;
+    background: rgba(0,0,0,0.6);
+    padding: 8px 12px;
+    border-radius: 6px;
+    color: white;
+    font-family: Arial;
+    z-index: 3;
   }
 </style>
 </head>
 <body>
 
 <div id="hud">
-  <div id="version">v4.0.0-hybrid-hand-skeleton</div>
+  <div>v5.0.0-mediapipe-visible-cam</div>
   <div id="fps">FPS: 0</div>
 </div>
 
+<video id="cam" autoplay playsinline muted></video>
 <canvas id="view" width="1280" height="720"></canvas>
+
+<!-- MediaPipe -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
 
 <script>
 const canvas = document.getElementById("view");
 const ctx = canvas.getContext("2d");
 const fpsEl = document.getElementById("fps");
+const video = document.getElementById("cam");
 
-// camera
-const video = document.createElement("video");
-video.autoplay = true;
-video.playsInline = true;
-video.muted = true;
-video.style.position = "absolute";
-video.style.opacity = "0";
-document.body.appendChild(video);
-
-// processing canvas
-const proc = document.createElement("canvas");
-proc.width = 320;
-proc.height = 180;
-const pctx = proc.getContext("2d");
-
-let lastFrame = null;
 let lastTime = performance.now();
-let frameCount = 0;
+let frames = 0;
 
-// keep last skeleton when hand leaves frame
-let lastSkeletons = [];
-
+// Start camera on tap
 document.body.addEventListener("click", async () => {
   const stream = await navigator.mediaDevices.getUserMedia({
     video: { facingMode: "environment" }
   });
   video.srcObject = stream;
-  startLoop();
+  startMediaPipe();
 });
 
 function updateFPS(now) {
-  frameCount++;
-  const dt = now - lastTime;
-  if (dt >= 1000) {
-    fpsEl.textContent = "FPS: " + Math.round((frameCount * 1000) / dt);
-    frameCount = 0;
+  frames++;
+  if (now - lastTime >= 1000) {
+    fpsEl.textContent = "FPS: " + frames;
+    frames = 0;
     lastTime = now;
   }
 }
 
-function startLoop() {
-  function loop(now) {
-    updateFPS(now);
-    detectHands();
-    requestAnimationFrame(loop);
+let hands;
+
+function startMediaPipe() {
+  hands = new Hands({
+    locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
+  });
+
+  hands.setOptions({
+    maxNumHands: 2,
+    modelComplexity: 1,
+    minDetectionConfidence: 0.7,
+    minTrackingConfidence: 0.7
+  });
+
+  hands.onResults(drawResults);
+
+  loop();
+}
+
+function loop(now) {
+  updateFPS(now);
+
+  if (video.readyState >= 2) {
+    hands.send({ image: video });
   }
+
   requestAnimationFrame(loop);
 }
 
-function detectHands() {
+function drawResults(results) {
   const w = canvas.width;
   const h = canvas.height;
   const half = w / 2;
 
-  // draw split-screen VR
+  // Draw VR split-screen
   ctx.drawImage(video, 0, 0, half, h);
   ctx.drawImage(video, half, 0, half, h);
 
-  // downscale for processing
-  pctx.drawImage(video, 0, 0, proc.width, proc.height);
-  const frame = pctx.getImageData(0, 0, proc.width, proc.height);
-  const data = frame.data;
-
-  if (!lastFrame) {
-    lastFrame = frame;
-    drawSkeletons(lastSkeletons);
-    return;
-  }
-
-  const last = lastFrame.data;
-  const mask = new Uint8ClampedArray(proc.width * proc.height);
-
-  // hybrid mask: skin + motion
-  for (let i = 0; i < data.length; i += 4) {
-    const r = data[i], g = data[i+1], b = data[i+2];
-    const lr = last[i], lg = last[i+1], lb = last[i+2];
-
-    // motion
-    const diff =
-      Math.abs(r - lr) +
-      Math.abs(g - lg) +
-      Math.abs(b - lb);
-
-    // YCrCb skin
-    const y  = 0.299*r + 0.587*g + 0.114*b;
-    const cr = (r - y) * 0.713 + 128;
-    const cb = (b - y) * 0.564 + 128;
-
-    const isSkin =
-      cr > 135 && cr < 180 &&
-      cb > 85  && cb < 135;
-
-    const idx = i / 4;
-    if (isSkin && diff > 25) {
-      mask[idx] = 255;
-    } else {
-      mask[idx] = 0;
-    }
-  }
-
-  lastFrame = frame;
-
-  // cluster mask into blobs (multiple hands)
-  const blobs = clusterMask(mask, proc.width, proc.height, 40);
-
-  const skeletons = [];
-
-  for (let blob of blobs) {
-    if (blob.length < 50) continue;
-
-    const hull = convexHull(blob);
-    if (hull.length < 5) continue;
-
-    const skeleton = buildSkeleton(hull);
-    skeletons.push(skeleton);
-  }
-
-  if (skeletons.length > 0) {
-    lastSkeletons = skeletons;
-  }
-
-  drawSkeletons(lastSkeletons);
-}
-
-function clusterMask(mask, w, h, minSize) {
-  const visited = new Uint8ClampedArray(mask.length);
-  const blobs = [];
-
-  const dirs = [
-    [1,0],[-1,0],[0,1],[0,-1],
-    [1,1],[1,-1],[-1,1],[-1,-1]
-  ];
-
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const idx = y * w + x;
-      if (mask[idx] === 255 && !visited[idx]) {
-        const queue = [{x,y}];
-        const blob = [];
-        visited[idx] = 1;
-
-        while (queue.length) {
-          const p = queue.shift();
-          blob.push(p);
-
-          for (let d of dirs) {
-            const nx = p.x + d[0];
-            const ny = p.y + d[1];
-            if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
-            const nidx = ny * w + nx;
-            if (mask[nidx] === 255 && !visited[nidx]) {
-              visited[nidx] = 1;
-              queue.push({x:nx,y:ny});
-            }
-          }
-        }
-
-        if (blob.length >= minSize) blobs.push(blob);
-      }
-    }
-  }
-
-  return blobs;
-}
-
-function convexHull(points) {
-  let hull = [];
-  let left = points.reduce((a, b) => (a.x < b.x ? a : b));
-
-  let current = left;
-  let next;
-
-  do {
-    hull.push(current);
-    next = points[0];
-
-    for (let p of points) {
-      const cross =
-        (next.x - current.x) * (p.y - current.y) -
-        (next.y - current.y) * (p.x - current.x);
-
-      if (next === current || cross < 0) next = p;
-    }
-
-    current = next;
-  } while (current !== left);
-
-  return hull;
-}
-
-function buildSkeleton(hull) {
-  // palm center
-  let cx = 0, cy = 0;
-  for (let p of hull) {
-    cx += p.x;
-    cy += p.y;
-  }
-  cx /= hull.length;
-  cy /= hull.length;
-
-  // pick top N fingertip candidates (furthest from center)
-  const scored = hull.map(p => {
-    const dx = p.x - cx;
-    const dy = p.y - cy;
-    return {p, d: dx*dx + dy*dy};
-  }).sort((a,b) => b.d - a.d);
-
-  const tips = scored.slice(0, 5).map(s => s.p);
-
-  return { palm: {x:cx,y:cy}, tips };
-}
-
-function drawSkeletons(skeletons) {
-  const scaleX = canvas.width / proc.width;
-  const scaleY = canvas.height / proc.height;
-
-  for (let s of skeletons) {
-    const cx = s.palm.x * scaleX;
-    const cy = s.palm.y * scaleY;
-
-    // palm
-    ctx.fillStyle = "yellow";
-    ctx.beginPath();
-    ctx.arc(cx, cy, 10, 0, Math.PI * 2);
-    ctx.fill();
-
-    // bones
-    ctx.strokeStyle = "white";
-    ctx.lineWidth = 3;
-
-    for (let tip of s.tips) {
-      const x = tip.x * scaleX;
-      const y = tip.y * scaleY;
-
-      ctx.fillStyle = "cyan";
-      ctx.beginPath();
-      ctx.arc(x, y, 6, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.beginPath();
-      ctx.moveTo(cx, cy);
-      ctx.lineTo(x, y);
-      ctx.stroke();
+  // Draw MediaPipe skeleton
+  if (results.multiHandLandmarks) {
+    for (const lm of results.multiHandLandmarks) {
+      drawingUtils.drawConnectors(ctx, lm, Hands.HAND_CONNECTIONS, {
+        color: "cyan", lineWidth: 4
+      });
+      drawingUtils.drawLandmarks(ctx, lm, {
+        color: "white", radius: 3
+      });
     }
   }
 }
