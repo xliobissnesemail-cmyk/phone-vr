@@ -2,13 +2,14 @@
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>VR 3D World</title>
+<title>Mobile VR 3D World (Safe Mode)</title>
 <style>
   body { margin: 0; overflow: hidden; background: black; }
   #view {
     position: fixed;
     top: 0; left: 0;
     width: 100vw; height: 100vh;
+    background: black;
   }
 </style>
 </head>
@@ -20,39 +21,47 @@
 
 <script>
 const canvas = document.getElementById("view");
-const renderer = new THREE.WebGLRenderer({ canvas });
-renderer.setSize(window.innerWidth, window.innerHeight);
 
-// 3D scene
+// MOBILE‑SAFE WEBGL SETTINGS
+const renderer = new THREE.WebGLRenderer({
+  canvas,
+  antialias: false,
+  alpha: false,
+  depth: false,
+  stencil: false,
+  powerPreference: "low-power"
+});
+
+// LOWER INTERNAL RESOLUTION (CRITICAL FIX)
+renderer.setSize(window.innerWidth / 2, window.innerHeight / 2, false);
+
 const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x222222);
 
 // Camera
-const camera = new THREE.PerspectiveCamera(
+const cam3D = new THREE.PerspectiveCamera(
   75,
   window.innerWidth / window.innerHeight,
   0.1,
   1000
 );
-camera.position.set(0, 1.6, 3);
+cam3D.position.set(0, 1.6, 3);
 
 // Floor
-const floorGeo = new THREE.PlaneGeometry(50, 50);
-const floorMat = new THREE.MeshStandardMaterial({ color: 0x444444 });
-const floor = new THREE.Mesh(floorGeo, floorMat);
+const floor = new THREE.Mesh(
+  new THREE.PlaneGeometry(50, 50),
+  new THREE.MeshBasicMaterial({ color: 0x444444 })
+);
 floor.rotation.x = -Math.PI / 2;
 scene.add(floor);
 
 // Cube
-const cubeGeo = new THREE.BoxGeometry(1, 1, 1);
-const cubeMat = new THREE.MeshStandardMaterial({ color: 0x00ff00 });
-const cube = new THREE.Mesh(cubeGeo, cubeMat);
+const cube = new THREE.Mesh(
+  new THREE.BoxGeometry(1, 1, 1),
+  new THREE.MeshBasicMaterial({ color: 0x00ff00 })
+);
 cube.position.set(0, 1, -3);
 scene.add(cube);
-
-// Light
-const light = new THREE.DirectionalLight(0xffffff, 1);
-light.position.set(5, 10, 5);
-scene.add(light);
 
 // Movement
 let forward = 0;
@@ -64,7 +73,6 @@ window.addEventListener("keydown", (e) => {
   if (e.key === "a") strafe = -0.1;
   if (e.key === "d") strafe = 0.1;
 });
-
 window.addEventListener("keyup", () => {
   forward = 0;
   strafe = 0;
@@ -80,22 +88,19 @@ window.addEventListener("deviceorientation", (e) => {
 
 // Render loop
 function render() {
-  // Apply rotation
-  camera.rotation.set(pitch, yaw, 0);
+  cam3D.rotation.set(pitch, yaw, 0);
 
-  // Apply movement
-  camera.position.x += Math.sin(yaw) * forward + Math.cos(yaw) * strafe;
-  camera.position.z += Math.cos(yaw) * forward - Math.sin(yaw) * strafe;
+  cam3D.position.x += Math.sin(yaw) * forward + Math.cos(yaw) * strafe;
+  cam3D.position.z += Math.cos(yaw) * forward - Math.sin(yaw) * strafe;
 
-  // VR split-screen
   const w = window.innerWidth;
   const h = window.innerHeight;
 
   renderer.setViewport(0, 0, w/2, h);
-  renderer.render(scene, camera);
+  renderer.render(scene, cam3D);
 
   renderer.setViewport(w/2, 0, w/2, h);
-  renderer.render(scene, camera);
+  renderer.render(scene, cam3D);
 
   requestAnimationFrame(render);
 }
