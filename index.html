@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>VR Hand Tracking (Manual Mobile Fix)</title>
+<title>VR Simple Hand Detection</title>
 <style>
   body { margin: 0; overflow: hidden; background: black; color: white; font-family: Arial; }
   #view { width: 100vw; height: 100vh; display: block; }
@@ -10,26 +10,16 @@
     position: fixed; top: 10px; left: 10px; z-index: 10;
     background: rgba(0,0,0,0.6); padding: 8px 12px; border-radius: 6px;
   }
-  #startBtn {
-    position: fixed; bottom: 20px; left: 20px;
-    opacity: 0; pointer-events: auto; z-index: 999;
-  }
 </style>
 </head>
 <body>
 
 <div id="ui">
-  <div>VR Hand Tracking</div>
+  <div>VR Simple Hand Detection</div>
   <div id="status">Tap screen to start camera…</div>
 </div>
 
-<button id="startBtn">Start Camera</button>
-
 <canvas id="view" width="1280" height="720"></canvas>
-
-<!-- MediaPipe Hands -->
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
 
 <script>
 const canvas = document.getElementById("view");
@@ -44,7 +34,6 @@ video.setAttribute("playsinline", "");
 video.setAttribute("autoplay", "");
 video.muted = true;
 
-// MUST be real size for mobile
 video.style.position = "absolute";
 video.style.top = "0";
 video.style.left = "0";
@@ -56,108 +45,90 @@ video.style.pointerEvents = "none";
 document.body.appendChild(video);
 
 // ------------------------------
-// Hidden Start Button
+// Start camera on tap
 // ------------------------------
-const startBtn = document.getElementById("startBtn");
-
-startBtn.onclick = async () => {
-  statusEl.textContent = "Starting camera…";
-
+document.body.addEventListener("click", async () => {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: "environment" }
     });
-
     video.srcObject = stream;
-
-    statusEl.textContent = "Camera OK — starting hand tracking…";
-
-    startHandTracking();
+    statusEl.textContent = "Camera OK — detecting hands…";
+    startDetection();
   } catch (err) {
     statusEl.textContent = "Camera error: " + err.name;
   }
-};
-
-// Auto-trigger hidden button when user taps screen
-document.body.addEventListener("click", () => startBtn.click());
-
-// ------------------------------
-// MediaPipe Hands Setup
-// ------------------------------
-const hands = new Hands({
-  locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
 });
 
-hands.setOptions({
-  maxNumHands: 2,
-  modelComplexity: 1,
-  minDetectionConfidence: 0.7,
-  minTrackingConfidence: 0.7
-});
-
-hands.onResults(onHandsResults);
-
 // ------------------------------
-// MANUAL FRAME SENDING (Mobile Fix)
+// Simple Hand Detection (No MediaPipe)
 // ------------------------------
-function startHandTracking() {
-  function processFrame() {
+let lastFrame = null;
+
+function startDetection() {
+  function loop() {
     if (video.readyState >= 2) {
-      hands.send({ image: video });
+      detectHands();
     }
-    requestAnimationFrame(processFrame);
+    requestAnimationFrame(loop);
   }
-  processFrame();
+  loop();
 }
 
-// ------------------------------
-// DRAW HAND OUTLINES
-// ------------------------------
-function onHandsResults(results) {
-  const width = canvas.width;
-  const height = canvas.height;
-  const half = width / 2;
+function detectHands() {
+  const w = canvas.width;
+  const h = canvas.height;
+  const half = w / 2;
 
   // Draw split-screen video
-  ctx.clearRect(0, 0, width, height);
+  ctx.drawImage(video, 0, 0, half, h);
+  ctx.drawImage(video, half, 0, half, h);
 
-  if (results.image) {
-    ctx.drawImage(results.image, 0, 0, half, height);
-    ctx.drawImage(results.image, half, 0, half, height);
+  // Get frame data
+  const frame = ctx.getImageData(0, 0, w, h);
+  const data = frame.data;
+
+  // Create mask for skin detection
+  const mask = new Uint8ClampedArray(w * h);
+
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+
+    // Convert to YCrCb
+    const y  = 0.299*r + 0.587*g + 0.114*b;
+    const cr = (r - y) * 0.713 + 128;
+    const cb = (b - y) * 0.564 + 128;
+
+    // Simple skin color range
+    const isSkin =
+      cr > 135 && cr < 180 &&
+      cb > 85  && cb < 135;
+
+    mask[i / 4] = isSkin ? 255 : 0;
   }
 
-  // Draw hand outlines
-  if (results.multiHandLandmarks) {
-    ctx.lineWidth = 4;
-    ctx.strokeStyle = "cyan";
-    ctx.fillStyle = "white";
+  // Find largest blob (hand)
+  let minX = w, minY = h, maxX = 0, maxY = 0;
 
-    for (const landmarks of results.multiHandLandmarks) {
-      drawHandOutline(landmarks, width, height);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const idx = y * w + x;
+      if (mask[idx] === 255) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
     }
   }
 
-  statusEl.textContent = "Hand tracking active";
-}
-
-function drawHandOutline(landmarks, width, height) {
-  ctx.beginPath();
-  for (let i = 0; i < landmarks.length; i++) {
-    const x = landmarks[i].x * width;
-    const y = landmarks[i].y * height;
-    if (i === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  }
-  ctx.closePath();
-  ctx.stroke();
-
-  // Draw circles at each landmark
-  for (let i = 0; i < landmarks.length; i++) {
-    const x = landmarks[i].x * width;
-    const y = landmarks[i].y * height;
-    ctx.beginPath();
-    ctx.arc(x, y, 4, 0, Math.PI * 2);
-    ctx.fill();
+  // Draw outline if hand detected
+  if (maxX - minX > 20 && maxY - minY > 20) {
+    ctx.strokeStyle = "cyan";
+    ctx.lineWidth = 4;
+    ctx.strokeRect(minX, minY, maxX - minX, maxY - minY);
   }
 }
 </script>
