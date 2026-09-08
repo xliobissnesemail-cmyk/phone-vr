@@ -2,110 +2,101 @@
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>Mobile VR 3D World (Safe Mode)</title>
+<title>VR Camera Base</title>
 <style>
   body { margin: 0; overflow: hidden; background: black; }
+
+  /* Fullscreen camera */
+  #cam {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100vw; height: 100vh;
+    object-fit: cover;
+    z-index: 0;
+  }
+
+  /* Canvas for VR split-screen */
   #view {
     position: fixed;
     top: 0; left: 0;
     width: 100vw; height: 100vh;
-    background: black;
+    z-index: 1;
+    pointer-events: none;
+  }
+
+  #hud {
+    position: fixed;
+    top: 10px; right: 10px;
+    background: rgba(0,0,0,0.6);
+    padding: 8px 12px;
+    border-radius: 6px;
+    color: white;
+    font-family: Arial;
+    z-index: 2;
   }
 </style>
 </head>
 <body>
 
-<canvas id="view"></canvas>
+<div id="hud">
+  <div>v1.0.0-vr-base</div>
+  <div id="fps">FPS: 0</div>
+</div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<video id="cam" autoplay playsinline muted></video>
+<canvas id="view" width="1280" height="720"></canvas>
 
 <script>
+const video = document.getElementById("cam");
 const canvas = document.getElementById("view");
+const ctx = canvas.getContext("2d");
+const fpsEl = document.getElementById("fps");
 
-// MOBILE‑SAFE WEBGL SETTINGS
-const renderer = new THREE.WebGLRenderer({
-  canvas,
-  antialias: false,
-  alpha: false,
-  depth: false,
-  stencil: false,
-  powerPreference: "low-power"
+let lastTime = performance.now();
+let frames = 0;
+
+// Start camera
+document.body.addEventListener("click", async () => {
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: "environment" }
+  });
+  video.srcObject = stream;
+  startLoop();
 });
 
-// LOWER INTERNAL RESOLUTION (CRITICAL FIX)
-renderer.setSize(window.innerWidth / 2, window.innerHeight / 2, false);
-
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x222222);
-
-// Camera
-const cam3D = new THREE.PerspectiveCamera(
-  75,
-  window.innerWidth / window.innerHeight,
-  0.1,
-  1000
-);
-cam3D.position.set(0, 1.6, 3);
-
-// Floor
-const floor = new THREE.Mesh(
-  new THREE.PlaneGeometry(50, 50),
-  new THREE.MeshBasicMaterial({ color: 0x444444 })
-);
-floor.rotation.x = -Math.PI / 2;
-scene.add(floor);
-
-// Cube
-const cube = new THREE.Mesh(
-  new THREE.BoxGeometry(1, 1, 1),
-  new THREE.MeshBasicMaterial({ color: 0x00ff00 })
-);
-cube.position.set(0, 1, -3);
-scene.add(cube);
-
-// Movement
-let forward = 0;
-let strafe = 0;
-
-window.addEventListener("keydown", (e) => {
-  if (e.key === "w") forward = 0.1;
-  if (e.key === "s") forward = -0.1;
-  if (e.key === "a") strafe = -0.1;
-  if (e.key === "d") strafe = 0.1;
-});
-window.addEventListener("keyup", () => {
-  forward = 0;
-  strafe = 0;
-});
-
-// Gyro look
-let yaw = 0, pitch = 0;
-
-window.addEventListener("deviceorientation", (e) => {
-  yaw = (e.alpha || 0) * Math.PI/180;
-  pitch = (e.beta || 0) * Math.PI/180 - Math.PI/2;
-});
-
-// Render loop
-function render() {
-  cam3D.rotation.set(pitch, yaw, 0);
-
-  cam3D.position.x += Math.sin(yaw) * forward + Math.cos(yaw) * strafe;
-  cam3D.position.z += Math.cos(yaw) * forward - Math.sin(yaw) * strafe;
-
-  const w = window.innerWidth;
-  const h = window.innerHeight;
-
-  renderer.setViewport(0, 0, w/2, h);
-  renderer.render(scene, cam3D);
-
-  renderer.setViewport(w/2, 0, w/2, h);
-  renderer.render(scene, cam3D);
-
-  requestAnimationFrame(render);
+function updateFPS(now) {
+  frames++;
+  if (now - lastTime >= 1000) {
+    fpsEl.textContent = "FPS: " + frames;
+    frames = 0;
+    lastTime = now;
+  }
 }
 
-render();
+function startLoop() {
+  function loop(now) {
+    updateFPS(now);
+
+    if (video.readyState >= 2) {
+      drawVR();
+    }
+
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+}
+
+function drawVR() {
+  const w = canvas.width;
+  const h = canvas.height;
+  const half = w / 2;
+
+  ctx.clearRect(0, 0, w, h);
+
+  // VR split-screen
+  ctx.drawImage(video, 0, 0, half, h);
+  ctx.drawImage(video, half, 0, half, h);
+}
 </script>
 
 </body>
