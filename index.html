@@ -2,15 +2,10 @@
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>VR Advanced Hand Detection</title>
+<title>VR Advanced Hand Skeleton Detection</title>
 <style>
   body { margin: 0; overflow: hidden; background: black; color: white; font-family: Arial; }
   #view { width: 100vw; height: 100vh; display: block; }
-  #ui {
-    position: fixed; top: 10px; left: 10px; z-index: 10;
-    background: rgba(0,0,0,0.6); padding: 8px 12px; border-radius: 6px;
-    font-size: 14px;
-  }
   #hud {
     position: fixed; top: 10px; right: 10px; z-index: 10;
     background: rgba(0,0,0,0.6); padding: 8px 12px; border-radius: 6px;
@@ -20,13 +15,8 @@
 </head>
 <body>
 
-<div id="ui">
-  <div>VR Advanced Hand Detection</div>
-  <div id="status">Tap screen to start camera…</div>
-</div>
-
 <div id="hud">
-  <div id="version">v1.0.0-hand-detector</div>
+  <div id="version">v2.0.0-advanced-skeleton</div>
   <div id="fps">FPS: 0</div>
 </div>
 
@@ -35,46 +25,34 @@
 <script>
 const canvas = document.getElementById("view");
 const ctx = canvas.getContext("2d");
-const statusEl = document.getElementById("status");
 const fpsEl = document.getElementById("fps");
 
-// camera setup
+// Camera setup
 const video = document.createElement("video");
 video.autoplay = true;
 video.playsInline = true;
 video.muted = true;
 video.style.position = "absolute";
-video.style.top = "0";
-video.style.left = "0";
-video.style.width = "100vw";
-video.style.height = "100vh";
 video.style.opacity = "0";
-video.style.pointerEvents = "none";
 document.body.appendChild(video);
 
-// offscreen canvas for processing
+// Processing canvas
 const proc = document.createElement("canvas");
 proc.width = 320;
 proc.height = 180;
 const pctx = proc.getContext("2d");
 
-let lastFrame = null;
 let lastTime = performance.now();
 let frameCount = 0;
 let fps = 0;
 
-// start camera on tap
+// Start camera on tap
 document.body.addEventListener("click", async () => {
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: "environment" }
-    });
-    video.srcObject = stream;
-    statusEl.textContent = "Camera OK — detecting hands…";
-    startLoop();
-  } catch (err) {
-    statusEl.textContent = "Camera error: " + err.name;
-  }
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: "environment" }
+  });
+  video.srcObject = stream;
+  startLoop();
 });
 
 function updateFPS(now) {
@@ -90,86 +68,122 @@ function updateFPS(now) {
 
 function startLoop() {
   function loop(now) {
-    if (video.readyState >= 2) {
-      updateFPS(now);
-      detectHands();
-    }
+    updateFPS(now);
+    detectHandShape();
     requestAnimationFrame(loop);
   }
   requestAnimationFrame(loop);
 }
 
-function detectHands() {
+function detectHandShape() {
   const w = canvas.width;
   const h = canvas.height;
   const half = w / 2;
 
-  // draw split-screen video
+  // Draw split-screen VR
   ctx.drawImage(video, 0, 0, half, h);
   ctx.drawImage(video, half, 0, half, h);
 
-  // draw to processing canvas (downscaled)
+  // Downscale for processing
   pctx.drawImage(video, 0, 0, proc.width, proc.height);
   const frame = pctx.getImageData(0, 0, proc.width, proc.height);
-
-  if (!lastFrame) {
-    lastFrame = frame;
-    return;
-  }
-
   const data = frame.data;
-  const last = lastFrame.data;
-  const motionMask = new Uint8ClampedArray(proc.width * proc.height);
 
-  let minX = proc.width, minY = proc.height, maxX = 0, maxY = 0;
+  // Edge detection (simple Sobel-like)
+  const edges = [];
+  for (let y = 1; y < proc.height - 1; y++) {
+    for (let x = 1; x < proc.width - 1; x++) {
+      const i = (y * proc.width + x) * 4;
 
-  // motion + edge-ish detection
-  for (let i = 0; i < data.length; i += 4) {
-    const r = data[i], g = data[i+1], b = data[i+2];
-    const lr = last[i], lg = last[i+1], lb = last[i+2];
+      const gx =
+        -data[i - 4] + data[i + 4] +
+        -2 * data[i - 4 * proc.width] + 2 * data[i + 4 * proc.width] +
+        -data[i - 4 * proc.width - 4] + data[i + 4 * proc.width + 4];
 
-    const diff =
-      Math.abs(r - lr) +
-      Math.abs(g - lg) +
-      Math.abs(b - lb);
+      const gy =
+        -data[i - 4 * proc.width] - 2 * data[i - 4] - data[i - 4 + 4] +
+         data[i + 4 * proc.width] + 2 * data[i + 4] + data[i + 4 - 4];
 
-    const idx = i / 4;
+      const mag = Math.abs(gx) + Math.abs(gy);
 
-    if (diff > 40) {
-      motionMask[idx] = 255;
-      const x = idx % proc.width;
-      const y = Math.floor(idx / proc.width);
-
-      if (x < minX) minX = x;
-      if (x > maxX) maxX = x;
-      if (y < minY) minY = y;
-      if (y > maxY) maxY = y;
+      if (mag > 80) edges.push({ x, y });
     }
   }
 
-  lastFrame = frame;
+  if (edges.length < 20) return;
 
-  // simple smoothing: expand box slightly
-  if (maxX - minX > 5 && maxY - minY > 5) {
-    const padX = 10;
-    const padY = 10;
-    minX = Math.max(0, minX - padX);
-    minY = Math.max(0, minY - padY);
-    maxX = Math.min(proc.width - 1, maxX + padX);
-    maxY = Math.min(proc.height - 1, maxY + padY);
+  // Compute convex hull (gift wrapping)
+  const hull = convexHull(edges);
 
-    // map processing coords back to main canvas
-    const scaleX = canvas.width / proc.width;
-    const scaleY = canvas.height / proc.height;
+  // Draw skeleton
+  drawSkeleton(hull);
+}
 
-    const bx = minX * scaleX;
-    const by = minY * scaleY;
-    const bw = (maxX - minX) * scaleX;
-    const bh = (maxY - minY) * scaleY;
+function convexHull(points) {
+  // Jarvis March
+  let hull = [];
+  let left = points.reduce((a, b) => (a.x < b.x ? a : b));
 
-    ctx.strokeStyle = "cyan";
-    ctx.lineWidth = 4;
-    ctx.strokeRect(bx, by, bw, bh);
+  let current = left;
+  let next;
+
+  do {
+    hull.push(current);
+    next = points[0];
+
+    for (let p of points) {
+      const cross =
+        (next.x - current.x) * (p.y - current.y) -
+        (next.y - current.y) * (p.x - current.x);
+
+      if (next === current || cross < 0) next = p;
+    }
+
+    current = next;
+  } while (current !== left);
+
+  return hull;
+}
+
+function drawSkeleton(hull) {
+  const scaleX = canvas.width / proc.width;
+  const scaleY = canvas.height / proc.height;
+
+  // Palm center
+  let cx = 0, cy = 0;
+  for (let p of hull) {
+    cx += p.x;
+    cy += p.y;
+  }
+  cx /= hull.length;
+  cy /= hull.length;
+
+  cx *= scaleX;
+  cy *= scaleY;
+
+  // Draw palm center
+  ctx.fillStyle = "yellow";
+  ctx.beginPath();
+  ctx.arc(cx, cy, 10, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Draw hull points (finger tips)
+  ctx.fillStyle = "cyan";
+  for (let p of hull) {
+    const x = p.x * scaleX;
+    const y = p.y * scaleY;
+
+    ctx.beginPath();
+    ctx.arc(x, y, 6, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Draw bone from palm center
+    ctx.strokeStyle = "white";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(x, y);
+    ctx.stroke();
   }
 }
 </script>
