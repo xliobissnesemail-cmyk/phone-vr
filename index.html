@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>VR Simple Hand Detection</title>
+<title>VR Simple Hand Detection (Camera Guaranteed)</title>
 <style>
   body { margin: 0; overflow: hidden; background: black; color: white; font-family: Arial; }
   #view { width: 100vw; height: 100vh; display: block; }
@@ -27,33 +27,34 @@ const ctx = canvas.getContext("2d");
 const statusEl = document.getElementById("status");
 
 // ------------------------------
-// MOBILE-SAFE VIDEO ELEMENT
+// USE THE CAMERA CODE THAT WORKS
 // ------------------------------
 const video = document.createElement("video");
-video.setAttribute("playsinline", "");
-video.setAttribute("autoplay", "");
+video.autoplay = true;
+video.playsInline = true;
 video.muted = true;
 
+// Make video visible to browser
 video.style.position = "absolute";
 video.style.top = "0";
 video.style.left = "0";
-video.style.width = "320px";
-video.style.height = "240px";
-video.style.opacity = "0";
+video.style.width = "100vw";
+video.style.height = "100vh";
+video.style.opacity = "0"; // invisible but real
 video.style.pointerEvents = "none";
 
 document.body.appendChild(video);
 
-// ------------------------------
 // Start camera on tap
-// ------------------------------
 document.body.addEventListener("click", async () => {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: "environment" }
     });
+
     video.srcObject = stream;
     statusEl.textContent = "Camera OK — detecting hands…";
+
     startDetection();
   } catch (err) {
     statusEl.textContent = "Camera error: " + err.name;
@@ -61,7 +62,7 @@ document.body.addEventListener("click", async () => {
 });
 
 // ------------------------------
-// Simple Hand Detection (No MediaPipe)
+// SIMPLE HAND DETECTION (NO MEDIAPIPE)
 // ------------------------------
 let lastFrame = null;
 
@@ -88,7 +89,7 @@ function detectHands() {
   const frame = ctx.getImageData(0, 0, w, h);
   const data = frame.data;
 
-  // Create mask for skin detection
+  // Skin mask
   const mask = new Uint8ClampedArray(w * h);
 
   for (let i = 0; i < data.length; i += 4) {
@@ -101,7 +102,7 @@ function detectHands() {
     const cr = (r - y) * 0.713 + 128;
     const cb = (b - y) * 0.564 + 128;
 
-    // Simple skin color range
+    // Skin color range
     const isSkin =
       cr > 135 && cr < 180 &&
       cb > 85  && cb < 135;
@@ -109,7 +110,7 @@ function detectHands() {
     mask[i / 4] = isSkin ? 255 : 0;
   }
 
-  // Find largest blob (hand)
+  // Find largest blob
   let minX = w, minY = h, maxX = 0, maxY = 0;
 
   for (let y = 0; y < h; y++) {
@@ -124,7 +125,7 @@ function detectHands() {
     }
   }
 
-  // Draw outline if hand detected
+  // Draw outline
   if (maxX - minX > 20 && maxY - minY > 20) {
     ctx.strokeStyle = "cyan";
     ctx.lineWidth = 4;
