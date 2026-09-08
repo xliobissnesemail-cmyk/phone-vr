@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>VR MediaPipe Hand Tracking (Manual Fix)</title>
+<title>VR MediaPipe Hand Tracking (Fixed Loop)</title>
 <style>
   body { margin: 0; overflow: hidden; background: black; color: white; font-family: Arial; }
   #view { width: 100vw; height: 100vh; display: block; }
@@ -31,14 +31,13 @@ const ctx = canvas.getContext("2d");
 const statusEl = document.getElementById("status");
 
 // ------------------------------
-// WORKING CAMERA CODE (Your phone supports this)
+// WORKING CAMERA CODE
 // ------------------------------
 const video = document.createElement("video");
 video.autoplay = true;
 video.playsInline = true;
 video.muted = true;
 
-// Must be real size for mobile
 video.style.position = "absolute";
 video.style.top = "0";
 video.style.left = "0";
@@ -66,7 +65,7 @@ document.body.addEventListener("click", async () => {
 });
 
 // ------------------------------
-// MEDIAPIPE HANDS (Manual frame sending)
+// MEDIAPIPE HANDS
 // ------------------------------
 let hands;
 
@@ -86,20 +85,25 @@ function startMediaPipe() {
 
   statusEl.textContent = "MediaPipe ready — detecting hands…";
 
-  startManualLoop();
+  startLoop();
 }
 
 // ------------------------------
-// MANUAL FRAME LOOP (Fix for mobile)
+// FIXED LOOP (NO AWAIT)
 // ------------------------------
-function startManualLoop() {
-  async function loop() {
+let lastTime = 0;
+
+function startLoop() {
+  function loop(time) {
     if (video.readyState >= 2) {
-      await hands.send({ image: video });
+      if (time - lastTime > 33) { // ~30 FPS
+        hands.send({ image: video }); // DO NOT await
+        lastTime = time;
+      }
     }
     requestAnimationFrame(loop);
   }
-  loop();
+  loop(0);
 }
 
 // ------------------------------
