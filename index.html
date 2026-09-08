@@ -2,11 +2,11 @@
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>VR MediaPipe Fullscreen Camera</title>
+<title>VR MediaPipe Fullscreen + Skeleton</title>
 <style>
   body { margin: 0; overflow: hidden; background: black; }
 
-  /* FULLSCREEN VIDEO */
+  /* FULLSCREEN CAMERA */
   #cam {
     position: fixed;
     top: 0;
@@ -14,17 +14,17 @@
     width: 100vw;
     height: 100vh;
     object-fit: cover;
-    z-index: 1; /* video stays visible */
+    z-index: 1;
   }
 
-  /* VR CANVAS ON TOP */
+  /* TRANSPARENT CANVAS OVERLAY */
   #view {
     position: fixed;
     top: 0;
     left: 0;
     width: 100vw;
     height: 100vh;
-    z-index: 2; /* canvas draws over video */
+    z-index: 2;
     pointer-events: none;
   }
 
@@ -44,7 +44,7 @@
 <body>
 
 <div id="hud">
-  <div>v7.0.0-fullscreen-mediapipe</div>
+  <div>v8.0.0-fullscreen-vr-mediapipe</div>
   <div id="fps">FPS: 0</div>
 </div>
 
@@ -63,6 +63,7 @@ const video = document.getElementById("cam");
 let lastTime = performance.now();
 let frames = 0;
 
+// Start camera
 document.body.addEventListener("click", async () => {
   const stream = await navigator.mediaDevices.getUserMedia({
     video: { facingMode: "environment" }
@@ -114,11 +115,14 @@ function drawResults(results) {
   const h = canvas.height;
   const half = w / 2;
 
-  // VR split-screen drawn OVER the video
+  // CLEAR CANVAS
+  ctx.clearRect(0, 0, w, h);
+
+  // VR SPLIT-SCREEN DRAWN ON TOP OF VIDEO
   ctx.drawImage(video, 0, 0, half, h);
   ctx.drawImage(video, half, 0, half, h);
 
-  // Draw skeleton
+  // DRAW MEDIAPIPE HANDS
   if (results.multiHandLandmarks) {
     for (const lm of results.multiHandLandmarks) {
       drawingUtils.drawConnectors(ctx, lm, Hands.HAND_CONNECTIONS, {
