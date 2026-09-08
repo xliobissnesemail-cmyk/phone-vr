@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>VR Advanced Hand Skeleton Detection</title>
+<title>VR Multi-Hand Skeleton Detector</title>
 <style>
   body { margin: 0; overflow: hidden; background: black; color: white; font-family: Arial; }
   #view { width: 100vw; height: 100vh; display: block; }
@@ -16,7 +16,7 @@
 <body>
 
 <div id="hud">
-  <div id="version">v2.0.0-advanced-skeleton</div>
+  <div id="version">v3.0.0-multi-hand-skeleton</div>
   <div id="fps">FPS: 0</div>
 </div>
 
@@ -44,7 +44,6 @@ const pctx = proc.getContext("2d");
 
 let lastTime = performance.now();
 let frameCount = 0;
-let fps = 0;
 
 // Start camera on tap
 document.body.addEventListener("click", async () => {
@@ -59,8 +58,7 @@ function updateFPS(now) {
   frameCount++;
   const dt = now - lastTime;
   if (dt >= 1000) {
-    fps = Math.round((frameCount * 1000) / dt);
-    fpsEl.textContent = "FPS: " + fps;
+    fpsEl.textContent = "FPS: " + Math.round((frameCount * 1000) / dt);
     frameCount = 0;
     lastTime = now;
   }
@@ -69,13 +67,13 @@ function updateFPS(now) {
 function startLoop() {
   function loop(now) {
     updateFPS(now);
-    detectHandShape();
+    detectHands();
     requestAnimationFrame(loop);
   }
   requestAnimationFrame(loop);
 }
 
-function detectHandShape() {
+function detectHands() {
   const w = canvas.width;
   const h = canvas.height;
   const half = w / 2;
@@ -89,7 +87,7 @@ function detectHandShape() {
   const frame = pctx.getImageData(0, 0, proc.width, proc.height);
   const data = frame.data;
 
-  // Edge detection (simple Sobel-like)
+  // Edge detection
   const edges = [];
   for (let y = 1; y < proc.height - 1; y++) {
     for (let x = 1; x < proc.width - 1; x++) {
@@ -97,12 +95,11 @@ function detectHandShape() {
 
       const gx =
         -data[i - 4] + data[i + 4] +
-        -2 * data[i - 4 * proc.width] + 2 * data[i + 4 * proc.width] +
-        -data[i - 4 * proc.width - 4] + data[i + 4 * proc.width + 4];
+        -2 * data[i - 4 * proc.width] + 2 * data[i + 4 * proc.width];
 
       const gy =
-        -data[i - 4 * proc.width] - 2 * data[i - 4] - data[i - 4 + 4] +
-         data[i + 4 * proc.width] + 2 * data[i + 4] + data[i + 4 - 4];
+        -data[i - 4 * proc.width] - 2 * data[i - 4] +
+         data[i + 4 * proc.width] + 2 * data[i + 4];
 
       const mag = Math.abs(gx) + Math.abs(gy);
 
@@ -112,15 +109,44 @@ function detectHandShape() {
 
   if (edges.length < 20) return;
 
-  // Compute convex hull (gift wrapping)
-  const hull = convexHull(edges);
+  // Cluster edges into multiple blobs (hands)
+  const blobs = clusterPoints(edges, 25);
 
-  // Draw skeleton
-  drawSkeleton(hull);
+  // For each blob, compute convex hull and draw skeleton
+  for (let blob of blobs) {
+    if (blob.length < 30) continue;
+
+    const hull = convexHull(blob);
+    drawSkeleton(hull);
+  }
+}
+
+function clusterPoints(points, dist) {
+  const clusters = [];
+
+  for (let p of points) {
+    let found = false;
+
+    for (let c of clusters) {
+      for (let q of c) {
+        const dx = p.x - q.x;
+        const dy = p.y - q.y;
+        if (dx * dx + dy * dy < dist * dist) {
+          c.push(p);
+          found = true;
+          break;
+        }
+      }
+      if (found) break;
+    }
+
+    if (!found) clusters.push([p]);
+  }
+
+  return clusters;
 }
 
 function convexHull(points) {
-  // Jarvis March
   let hull = [];
   let left = points.reduce((a, b) => (a.x < b.x ? a : b));
 
@@ -167,19 +193,21 @@ function drawSkeleton(hull) {
   ctx.arc(cx, cy, 10, 0, Math.PI * 2);
   ctx.fill();
 
-  // Draw hull points (finger tips)
-  ctx.fillStyle = "cyan";
+  // Draw bones
+  ctx.strokeStyle = "white";
+  ctx.lineWidth = 3;
+
   for (let p of hull) {
     const x = p.x * scaleX;
     const y = p.y * scaleY;
 
+    // fingertip
+    ctx.fillStyle = "cyan";
     ctx.beginPath();
     ctx.arc(x, y, 6, 0, Math.PI * 2);
     ctx.fill();
 
-    // Draw bone from palm center
-    ctx.strokeStyle = "white";
-    ctx.lineWidth = 3;
+    // bone
     ctx.beginPath();
     ctx.moveTo(cx, cy);
     ctx.lineTo(x, y);
