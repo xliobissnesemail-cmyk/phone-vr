@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>VR MediaPipe Hand Tracking (Fixed Loop)</title>
+<title>VR MediaPipe Hand Tracking (Offscreen Fix)</title>
 <style>
   body { margin: 0; overflow: hidden; background: black; color: white; font-family: Arial; }
   #view { width: 100vw; height: 100vh; display: block; }
@@ -38,6 +38,7 @@ video.autoplay = true;
 video.playsInline = true;
 video.muted = true;
 
+// Must be real size for mobile
 video.style.position = "absolute";
 video.style.top = "0";
 video.style.left = "0";
@@ -47,6 +48,14 @@ video.style.opacity = "0";
 video.style.pointerEvents = "none";
 
 document.body.appendChild(video);
+
+// ------------------------------
+// OFFSCREEN CANVAS (Fix for freezing)
+// ------------------------------
+const off = document.createElement("canvas");
+off.width = 640;
+off.height = 480;
+const offCtx = off.getContext("2d");
 
 // Start camera on tap
 document.body.addEventListener("click", async () => {
@@ -89,15 +98,19 @@ function startMediaPipe() {
 }
 
 // ------------------------------
-// FIXED LOOP (NO AWAIT)
+// FIXED LOOP USING OFFSCREEN CANVAS
 // ------------------------------
 let lastTime = 0;
 
 function startLoop() {
   function loop(time) {
     if (video.readyState >= 2) {
-      if (time - lastTime > 33) { // ~30 FPS
-        hands.send({ image: video }); // DO NOT await
+      // Draw video to offscreen canvas
+      offCtx.drawImage(video, 0, 0, off.width, off.height);
+
+      // Throttle MediaPipe
+      if (time - lastTime > 33) {
+        hands.send({ image: off });
         lastTime = time;
       }
     }
@@ -114,9 +127,9 @@ function onHandsResults(results) {
   const h = canvas.height;
   const half = w / 2;
 
-  // Draw split-screen video
-  ctx.drawImage(video, 0, 0, half, h);
-  ctx.drawImage(video, half, 0, half, h);
+  // Draw split-screen video from offscreen canvas
+  ctx.drawImage(off, 0, 0, half, h);
+  ctx.drawImage(off, half, 0, half, h);
 
   // Draw MediaPipe hand landmarks
   if (results.multiHandLandmarks) {
