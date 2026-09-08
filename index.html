@@ -2,11 +2,10 @@
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>VR MediaPipe + Visible Camera</title>
+<title>VR MediaPipe Front Camera</title>
 <style>
   body { margin: 0; overflow: hidden; background: black; }
 
-  /* VR canvas */
   #view {
     width: 100vw;
     height: 100vh;
@@ -17,14 +16,15 @@
 
   /* Tiny visible camera feed */
   #cam {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 1px;
-    height: 1px;
-    z-index: 1;
-    opacity: 0.01; /* barely visible but NOT zero */
-    pointer-events: none;
+    position: fixed;
+    bottom: 10px;
+    right: 10px;
+    width: 80px;
+    height: 60px;
+    z-index: 3;
+    opacity: 0.4; /* must be visible */
+    border: 2px solid white;
+    border-radius: 6px;
   }
 
   #hud {
@@ -36,21 +36,20 @@
     border-radius: 6px;
     color: white;
     font-family: Arial;
-    z-index: 3;
+    z-index: 4;
   }
 </style>
 </head>
 <body>
 
 <div id="hud">
-  <div>v5.0.0-mediapipe-visible-cam</div>
+  <div>v6.0.0-mediapipe-frontcam</div>
   <div id="fps">FPS: 0</div>
 </div>
 
 <video id="cam" autoplay playsinline muted></video>
 <canvas id="view" width="1280" height="720"></canvas>
 
-<!-- MediaPipe -->
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
 
@@ -63,10 +62,9 @@ const video = document.getElementById("cam");
 let lastTime = performance.now();
 let frames = 0;
 
-// Start camera on tap
 document.body.addEventListener("click", async () => {
   const stream = await navigator.mediaDevices.getUserMedia({
-    video: { facingMode: "environment" }
+    video: { facingMode: "user" } // FRONT CAMERA FIX
   });
   video.srcObject = stream;
   startMediaPipe();
@@ -115,11 +113,11 @@ function drawResults(results) {
   const h = canvas.height;
   const half = w / 2;
 
-  // Draw VR split-screen
+  // VR split-screen
   ctx.drawImage(video, 0, 0, half, h);
   ctx.drawImage(video, half, 0, half, h);
 
-  // Draw MediaPipe skeleton
+  // Draw skeleton
   if (results.multiHandLandmarks) {
     for (const lm of results.multiHandLandmarks) {
       drawingUtils.drawConnectors(ctx, lm, Hands.HAND_CONNECTIONS, {
