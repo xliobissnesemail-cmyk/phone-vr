@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>VR Simple Hand Detection (Camera Guaranteed)</title>
+<title>VR Motion Hand Detection</title>
 <style>
   body { margin: 0; overflow: hidden; background: black; color: white; font-family: Arial; }
   #view { width: 100vw; height: 100vh; display: block; }
@@ -15,7 +15,7 @@
 <body>
 
 <div id="ui">
-  <div>VR Simple Hand Detection</div>
+  <div>VR Motion Hand Detection</div>
   <div id="status">Tap screen to start camera…</div>
 </div>
 
@@ -27,20 +27,19 @@ const ctx = canvas.getContext("2d");
 const statusEl = document.getElementById("status");
 
 // ------------------------------
-// USE THE CAMERA CODE THAT WORKS
+// WORKING CAMERA CODE
 // ------------------------------
 const video = document.createElement("video");
 video.autoplay = true;
 video.playsInline = true;
 video.muted = true;
 
-// Make video visible to browser
 video.style.position = "absolute";
 video.style.top = "0";
 video.style.left = "0";
 video.style.width = "100vw";
 video.style.height = "100vh";
-video.style.opacity = "0"; // invisible but real
+video.style.opacity = "0";
 video.style.pointerEvents = "none";
 
 document.body.appendChild(video);
@@ -53,7 +52,7 @@ document.body.addEventListener("click", async () => {
     });
 
     video.srcObject = stream;
-    statusEl.textContent = "Camera OK — detecting hands…";
+    statusEl.textContent = "Camera OK — detecting motion…";
 
     startDetection();
   } catch (err) {
@@ -62,21 +61,21 @@ document.body.addEventListener("click", async () => {
 });
 
 // ------------------------------
-// SIMPLE HAND DETECTION (NO MEDIAPIPE)
+// MOTION-BASED HAND DETECTION
 // ------------------------------
 let lastFrame = null;
 
 function startDetection() {
   function loop() {
     if (video.readyState >= 2) {
-      detectHands();
+      detectMotion();
     }
     requestAnimationFrame(loop);
   }
   loop();
 }
 
-function detectHands() {
+function detectMotion() {
   const w = canvas.width;
   const h = canvas.height;
   const half = w / 2;
@@ -85,47 +84,43 @@ function detectHands() {
   ctx.drawImage(video, 0, 0, half, h);
   ctx.drawImage(video, half, 0, half, h);
 
-  // Get frame data
+  // Get current frame
   const frame = ctx.getImageData(0, 0, w, h);
-  const data = frame.data;
 
-  // Skin mask
-  const mask = new Uint8ClampedArray(w * h);
-
-  for (let i = 0; i < data.length; i += 4) {
-    const r = data[i];
-    const g = data[i + 1];
-    const b = data[i + 2];
-
-    // Convert to YCrCb
-    const y  = 0.299*r + 0.587*g + 0.114*b;
-    const cr = (r - y) * 0.713 + 128;
-    const cb = (b - y) * 0.564 + 128;
-
-    // Skin color range
-    const isSkin =
-      cr > 135 && cr < 180 &&
-      cb > 85  && cb < 135;
-
-    mask[i / 4] = isSkin ? 255 : 0;
+  if (!lastFrame) {
+    lastFrame = frame;
+    return;
   }
 
-  // Find largest blob
+  const motionMask = new Uint8ClampedArray(w * h);
+
   let minX = w, minY = h, maxX = 0, maxY = 0;
 
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const idx = y * w + x;
-      if (mask[idx] === 255) {
-        if (x < minX) minX = x;
-        if (x > maxX) maxX = x;
-        if (y < minY) minY = y;
-        if (y > maxY) maxY = y;
-      }
+  // Compare frames
+  for (let i = 0; i < frame.data.length; i += 4) {
+    const diff =
+      Math.abs(frame.data[i] - lastFrame.data[i]) +
+      Math.abs(frame.data[i+1] - lastFrame.data[i+1]) +
+      Math.abs(frame.data[i+2] - lastFrame.data[i+2]);
+
+    const idx = i / 4;
+
+    if (diff > 40) { // motion threshold
+      motionMask[idx] = 255;
+
+      const x = idx % w;
+      const y = Math.floor(idx / w);
+
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
     }
   }
 
-  // Draw outline
+  lastFrame = frame;
+
+  // Draw motion outline
   if (maxX - minX > 20 && maxY - minY > 20) {
     ctx.strokeStyle = "cyan";
     ctx.lineWidth = 4;
