@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>VR Motion Hand Detection</title>
+<title>VR MediaPipe Hand Tracking (Manual Fix)</title>
 <style>
   body { margin: 0; overflow: hidden; background: black; color: white; font-family: Arial; }
   #view { width: 100vw; height: 100vh; display: block; }
@@ -15,11 +15,15 @@
 <body>
 
 <div id="ui">
-  <div>VR Motion Hand Detection</div>
+  <div>VR MediaPipe Hand Tracking</div>
   <div id="status">Tap screen to start camera…</div>
 </div>
 
 <canvas id="view" width="1280" height="720"></canvas>
+
+<!-- MediaPipe Hands -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
 
 <script>
 const canvas = document.getElementById("view");
@@ -27,13 +31,14 @@ const ctx = canvas.getContext("2d");
 const statusEl = document.getElementById("status");
 
 // ------------------------------
-// WORKING CAMERA CODE
+// WORKING CAMERA CODE (Your phone supports this)
 // ------------------------------
 const video = document.createElement("video");
 video.autoplay = true;
 video.playsInline = true;
 video.muted = true;
 
+// Must be real size for mobile
 video.style.position = "absolute";
 video.style.top = "0";
 video.style.left = "0";
@@ -52,30 +57,55 @@ document.body.addEventListener("click", async () => {
     });
 
     video.srcObject = stream;
-    statusEl.textContent = "Camera OK — detecting motion…";
+    statusEl.textContent = "Camera OK — loading MediaPipe…";
 
-    startDetection();
+    startMediaPipe();
   } catch (err) {
     statusEl.textContent = "Camera error: " + err.name;
   }
 });
 
 // ------------------------------
-// MOTION-BASED HAND DETECTION
+// MEDIAPIPE HANDS (Manual frame sending)
 // ------------------------------
-let lastFrame = null;
+let hands;
 
-function startDetection() {
-  function loop() {
+function startMediaPipe() {
+  hands = new Hands({
+    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+  });
+
+  hands.setOptions({
+    maxNumHands: 2,
+    modelComplexity: 1,
+    minDetectionConfidence: 0.7,
+    minTrackingConfidence: 0.7
+  });
+
+  hands.onResults(onHandsResults);
+
+  statusEl.textContent = "MediaPipe ready — detecting hands…";
+
+  startManualLoop();
+}
+
+// ------------------------------
+// MANUAL FRAME LOOP (Fix for mobile)
+// ------------------------------
+function startManualLoop() {
+  async function loop() {
     if (video.readyState >= 2) {
-      detectMotion();
+      await hands.send({ image: video });
     }
     requestAnimationFrame(loop);
   }
   loop();
 }
 
-function detectMotion() {
+// ------------------------------
+// DRAW HAND OUTLINES
+// ------------------------------
+function onHandsResults(results) {
   const w = canvas.width;
   const h = canvas.height;
   const half = w / 2;
@@ -84,48 +114,19 @@ function detectMotion() {
   ctx.drawImage(video, 0, 0, half, h);
   ctx.drawImage(video, half, 0, half, h);
 
-  // Get current frame
-  const frame = ctx.getImageData(0, 0, w, h);
-
-  if (!lastFrame) {
-    lastFrame = frame;
-    return;
-  }
-
-  const motionMask = new Uint8ClampedArray(w * h);
-
-  let minX = w, minY = h, maxX = 0, maxY = 0;
-
-  // Compare frames
-  for (let i = 0; i < frame.data.length; i += 4) {
-    const diff =
-      Math.abs(frame.data[i] - lastFrame.data[i]) +
-      Math.abs(frame.data[i+1] - lastFrame.data[i+1]) +
-      Math.abs(frame.data[i+2] - lastFrame.data[i+2]);
-
-    const idx = i / 4;
-
-    if (diff > 40) { // motion threshold
-      motionMask[idx] = 255;
-
-      const x = idx % w;
-      const y = Math.floor(idx / w);
-
-      if (x < minX) minX = x;
-      if (x > maxX) maxX = x;
-      if (y < minY) minY = y;
-      if (y > maxY) maxY = y;
+  // Draw MediaPipe hand landmarks
+  if (results.multiHandLandmarks) {
+    for (const landmarks of results.multiHandLandmarks) {
+      drawingUtils.drawConnectors(ctx, landmarks, Hands.HAND_CONNECTIONS, {
+        color: "cyan", lineWidth: 4
+      });
+      drawingUtils.drawLandmarks(ctx, landmarks, {
+        color: "white", radius: 3
+      });
     }
   }
 
-  lastFrame = frame;
-
-  // Draw motion outline
-  if (maxX - minX > 20 && maxY - minY > 20) {
-    ctx.strokeStyle = "cyan";
-    ctx.lineWidth = 4;
-    ctx.strokeRect(minX, minY, maxX - minX, maxY - minY);
-  }
+  statusEl.textContent = "Hand tracking active";
 }
 </script>
 
