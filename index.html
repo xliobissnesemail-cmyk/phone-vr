@@ -2,43 +2,47 @@
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>VR MediaPipe Hand Tracking (Offscreen Fix)</title>
+<title>VR Advanced Hand Detection</title>
 <style>
   body { margin: 0; overflow: hidden; background: black; color: white; font-family: Arial; }
   #view { width: 100vw; height: 100vh; display: block; }
   #ui {
     position: fixed; top: 10px; left: 10px; z-index: 10;
     background: rgba(0,0,0,0.6); padding: 8px 12px; border-radius: 6px;
+    font-size: 14px;
+  }
+  #hud {
+    position: fixed; top: 10px; right: 10px; z-index: 10;
+    background: rgba(0,0,0,0.6); padding: 8px 12px; border-radius: 6px;
+    font-size: 14px; text-align: right;
   }
 </style>
 </head>
 <body>
 
 <div id="ui">
-  <div>VR MediaPipe Hand Tracking</div>
+  <div>VR Advanced Hand Detection</div>
   <div id="status">Tap screen to start camera…</div>
 </div>
 
-<canvas id="view" width="1280" height="720"></canvas>
+<div id="hud">
+  <div id="version">v1.0.0-hand-detector</div>
+  <div id="fps">FPS: 0</div>
+</div>
 
-<!-- MediaPipe Hands -->
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+<canvas id="view" width="1280" height="720"></canvas>
 
 <script>
 const canvas = document.getElementById("view");
 const ctx = canvas.getContext("2d");
 const statusEl = document.getElementById("status");
+const fpsEl = document.getElementById("fps");
 
-// ------------------------------
-// WORKING CAMERA CODE
-// ------------------------------
+// camera setup
 const video = document.createElement("video");
 video.autoplay = true;
 video.playsInline = true;
 video.muted = true;
-
-// Must be real size for mobile
 video.style.position = "absolute";
 video.style.top = "0";
 video.style.left = "0";
@@ -46,104 +50,127 @@ video.style.width = "100vw";
 video.style.height = "100vh";
 video.style.opacity = "0";
 video.style.pointerEvents = "none";
-
 document.body.appendChild(video);
 
-// ------------------------------
-// OFFSCREEN CANVAS (Fix for freezing)
-// ------------------------------
-const off = document.createElement("canvas");
-off.width = 640;
-off.height = 480;
-const offCtx = off.getContext("2d");
+// offscreen canvas for processing
+const proc = document.createElement("canvas");
+proc.width = 320;
+proc.height = 180;
+const pctx = proc.getContext("2d");
 
-// Start camera on tap
+let lastFrame = null;
+let lastTime = performance.now();
+let frameCount = 0;
+let fps = 0;
+
+// start camera on tap
 document.body.addEventListener("click", async () => {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: "environment" }
     });
-
     video.srcObject = stream;
-    statusEl.textContent = "Camera OK — loading MediaPipe…";
-
-    startMediaPipe();
+    statusEl.textContent = "Camera OK — detecting hands…";
+    startLoop();
   } catch (err) {
     statusEl.textContent = "Camera error: " + err.name;
   }
 });
 
-// ------------------------------
-// MEDIAPIPE HANDS
-// ------------------------------
-let hands;
-
-function startMediaPipe() {
-  hands = new Hands({
-    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
-  });
-
-  hands.setOptions({
-    maxNumHands: 2,
-    modelComplexity: 1,
-    minDetectionConfidence: 0.7,
-    minTrackingConfidence: 0.7
-  });
-
-  hands.onResults(onHandsResults);
-
-  statusEl.textContent = "MediaPipe ready — detecting hands…";
-
-  startLoop();
+function updateFPS(now) {
+  frameCount++;
+  const dt = now - lastTime;
+  if (dt >= 1000) {
+    fps = Math.round((frameCount * 1000) / dt);
+    fpsEl.textContent = "FPS: " + fps;
+    frameCount = 0;
+    lastTime = now;
+  }
 }
 
-// ------------------------------
-// FIXED LOOP USING OFFSCREEN CANVAS
-// ------------------------------
-let lastTime = 0;
-
 function startLoop() {
-  function loop(time) {
+  function loop(now) {
     if (video.readyState >= 2) {
-      // Draw video to offscreen canvas
-      offCtx.drawImage(video, 0, 0, off.width, off.height);
-
-      // Throttle MediaPipe
-      if (time - lastTime > 33) {
-        hands.send({ image: off });
-        lastTime = time;
-      }
+      updateFPS(now);
+      detectHands();
     }
     requestAnimationFrame(loop);
   }
-  loop(0);
+  requestAnimationFrame(loop);
 }
 
-// ------------------------------
-// DRAW HAND OUTLINES
-// ------------------------------
-function onHandsResults(results) {
+function detectHands() {
   const w = canvas.width;
   const h = canvas.height;
   const half = w / 2;
 
-  // Draw split-screen video from offscreen canvas
-  ctx.drawImage(off, 0, 0, half, h);
-  ctx.drawImage(off, half, 0, half, h);
+  // draw split-screen video
+  ctx.drawImage(video, 0, 0, half, h);
+  ctx.drawImage(video, half, 0, half, h);
 
-  // Draw MediaPipe hand landmarks
-  if (results.multiHandLandmarks) {
-    for (const landmarks of results.multiHandLandmarks) {
-      drawingUtils.drawConnectors(ctx, landmarks, Hands.HAND_CONNECTIONS, {
-        color: "cyan", lineWidth: 4
-      });
-      drawingUtils.drawLandmarks(ctx, landmarks, {
-        color: "white", radius: 3
-      });
+  // draw to processing canvas (downscaled)
+  pctx.drawImage(video, 0, 0, proc.width, proc.height);
+  const frame = pctx.getImageData(0, 0, proc.width, proc.height);
+
+  if (!lastFrame) {
+    lastFrame = frame;
+    return;
+  }
+
+  const data = frame.data;
+  const last = lastFrame.data;
+  const motionMask = new Uint8ClampedArray(proc.width * proc.height);
+
+  let minX = proc.width, minY = proc.height, maxX = 0, maxY = 0;
+
+  // motion + edge-ish detection
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i], g = data[i+1], b = data[i+2];
+    const lr = last[i], lg = last[i+1], lb = last[i+2];
+
+    const diff =
+      Math.abs(r - lr) +
+      Math.abs(g - lg) +
+      Math.abs(b - lb);
+
+    const idx = i / 4;
+
+    if (diff > 40) {
+      motionMask[idx] = 255;
+      const x = idx % proc.width;
+      const y = Math.floor(idx / proc.width);
+
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
     }
   }
 
-  statusEl.textContent = "Hand tracking active";
+  lastFrame = frame;
+
+  // simple smoothing: expand box slightly
+  if (maxX - minX > 5 && maxY - minY > 5) {
+    const padX = 10;
+    const padY = 10;
+    minX = Math.max(0, minX - padX);
+    minY = Math.max(0, minY - padY);
+    maxX = Math.min(proc.width - 1, maxX + padX);
+    maxY = Math.min(proc.height - 1, maxY + padY);
+
+    // map processing coords back to main canvas
+    const scaleX = canvas.width / proc.width;
+    const scaleY = canvas.height / proc.height;
+
+    const bx = minX * scaleX;
+    const by = minY * scaleY;
+    const bw = (maxX - minX) * scaleX;
+    const bh = (maxY - minY) * scaleY;
+
+    ctx.strokeStyle = "cyan";
+    ctx.lineWidth = 4;
+    ctx.strokeRect(bx, by, bw, bh);
+  }
 }
 </script>
 
