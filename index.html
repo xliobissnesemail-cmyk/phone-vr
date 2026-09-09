@@ -2,11 +2,10 @@
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>VR Camera Base</title>
+<title>VR Camera + Joy-Con Controllers</title>
 <style>
   body { margin: 0; overflow: hidden; background: black; }
 
-  /* Fullscreen camera */
   #cam {
     position: fixed;
     top: 0; left: 0;
@@ -15,7 +14,6 @@
     z-index: 0;
   }
 
-  /* Canvas overlay for VR split-screen */
   #view {
     position: fixed;
     top: 0; left: 0;
@@ -39,8 +37,9 @@
 <body>
 
 <div id="hud">
-  <div>v1.0.1-vr-base-no-mediapipe</div>
+  <div>v3.0.0-joycon-vr</div>
   <div id="fps">FPS: 0</div>
+  <div id="status">Waiting for Joy-Cons...</div>
 </div>
 
 <video id="cam" autoplay playsinline muted></video>
@@ -51,11 +50,21 @@ const video = document.getElementById("cam");
 const canvas = document.getElementById("view");
 const ctx = canvas.getContext("2d");
 const fpsEl = document.getElementById("fps");
+const statusEl = document.getElementById("status");
 
 let lastTime = performance.now();
 let frames = 0;
 
-// Start camera
+// Joy-Con controller data
+let leftCon = null;
+let rightCon = null;
+
+let leftRot = { yaw: 0, pitch: 0, roll: 0 };
+let rightRot = { yaw: 0, pitch: 0, roll: 0 };
+
+let player = { x: 0, z: 0 };
+
+// CAMERA START
 document.body.addEventListener("click", async () => {
   const stream = await navigator.mediaDevices.getUserMedia({
     video: { facingMode: "environment" }
@@ -64,6 +73,22 @@ document.body.addEventListener("click", async () => {
   startLoop();
 });
 
+// GAMEPAD CONNECT
+window.addEventListener("gamepadconnected", (e) => {
+  const pad = e.gamepad;
+
+  if (pad.id.includes("Joy-Con (L)")) {
+    leftCon = pad;
+    statusEl.textContent = "Left Joy-Con connected!";
+  }
+
+  if (pad.id.includes("Joy-Con (R)")) {
+    rightCon = pad;
+    statusEl.textContent = "Right Joy-Con connected!";
+  }
+});
+
+// FPS COUNTER
 function updateFPS(now) {
   frames++;
   if (now - lastTime >= 1000) {
@@ -73,19 +98,69 @@ function updateFPS(now) {
   }
 }
 
-function startLoop() {
-  function loop(now) {
-    updateFPS(now);
+// READ JOY-CON INPUT
+function readJoyCons() {
+  const pads = navigator.getGamepads();
 
-    if (video.readyState >= 2) {
-      drawVR();
-    }
+  for (const pad of pads) {
+    if (!pad) continue;
 
-    requestAnimationFrame(loop);
+    // Identify left/right Joy-Con
+    if (pad.id.includes("Joy-Con (L)")) leftCon = pad;
+    if (pad.id.includes("Joy-Con (R)")) rightCon = pad;
   }
-  requestAnimationFrame(loop);
+
+  // Movement from right Joy-Con stick
+  if (rightCon) {
+    const stickX = rightCon.axes[0];
+    const stickY = rightCon.axes[1];
+
+    player.x += stickX * 0.1;
+    player.z += stickY * 0.1;
+  }
+
+  // Rotation from Joy-Con IMU (if supported)
+  if (leftCon && leftCon.pose) leftRot = getRotation(leftCon.pose.orientation);
+  if (rightCon && rightCon.pose) rightRot = getRotation(rightCon.pose.orientation);
 }
 
+// Convert quaternion → Euler angles
+function getRotation(q) {
+  if (!q) return { yaw: 0, pitch: 0, roll: 0 };
+
+  const yaw = Math.atan2(
+    2 * (q.w * q.z + q.x * q.y),
+    1 - 2 * (q.y * q.y + q.z * q.z)
+  );
+
+  const pitch = Math.asin(
+    2 * (q.w * q.y - q.z * q.x)
+  );
+
+  const roll = Math.atan2(
+    2 * (q.w * q.x + q.y * q.z),
+    1 - 2 * (q.x * q.x + q.y * q.y)
+  );
+
+  return { yaw, pitch, roll };
+}
+
+// DRAW VR CONTROLLERS
+function drawController(x, y, rot) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(rot.yaw);
+
+  ctx.fillStyle = "rgba(0,200,255,0.8)";
+  ctx.fillRect(-20, -60, 40, 120);
+
+  ctx.fillStyle = "white";
+  ctx.fillRect(-10, -70, 20, 10);
+
+  ctx.restore();
+}
+
+// VR DRAW LOOP
 function drawVR() {
   const w = canvas.width;
   const h = canvas.height;
@@ -93,9 +168,24 @@ function drawVR() {
 
   ctx.clearRect(0, 0, w, h);
 
-  // VR split-screen
+  // VR split-screen camera
   ctx.drawImage(video, 0, 0, half, h);
   ctx.drawImage(video, half, 0, half, h);
+
+  // Draw controllers
+  drawController(200, 400, leftRot);
+  drawController(w - 200, 400, rightRot);
+}
+
+// MAIN LOOP
+function startLoop() {
+  function loop(now) {
+    updateFPS(now);
+    readJoyCons();
+    drawVR();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
 }
 </script>
 
