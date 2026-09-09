@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>VR Camera Base</title>
+<title>VR Camera + MediaPipe Hands</title>
 <style>
   body { margin: 0; overflow: hidden; background: black; }
 
@@ -15,7 +15,7 @@
     z-index: 0;
   }
 
-  /* Canvas for VR split-screen */
+  /* Canvas overlay */
   #view {
     position: fixed;
     top: 0; left: 0;
@@ -39,12 +39,15 @@
 <body>
 
 <div id="hud">
-  <div>v1.0.0-vr-base</div>
+  <div>v2.0.0-vr-mediapipe</div>
   <div id="fps">FPS: 0</div>
 </div>
 
 <video id="cam" autoplay playsinline muted></video>
 <canvas id="view" width="1280" height="720"></canvas>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
 
 <script>
 const video = document.getElementById("cam");
@@ -61,7 +64,7 @@ document.body.addEventListener("click", async () => {
     video: { facingMode: "environment" }
   });
   video.srcObject = stream;
-  startLoop();
+  startMediaPipe();
 });
 
 function updateFPS(now) {
@@ -73,20 +76,36 @@ function updateFPS(now) {
   }
 }
 
-function startLoop() {
-  function loop(now) {
-    updateFPS(now);
+let hands;
 
-    if (video.readyState >= 2) {
-      drawVR();
-    }
+function startMediaPipe() {
+  hands = new Hands({
+    locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
+  });
 
-    requestAnimationFrame(loop);
+  hands.setOptions({
+    maxNumHands: 2,
+    modelComplexity: 1,
+    minDetectionConfidence: 0.7,
+    minTrackingConfidence: 0.7
+  });
+
+  hands.onResults(drawResults);
+
+  loop();
+}
+
+function loop(now) {
+  updateFPS(now);
+
+  if (video.readyState >= 2) {
+    hands.send({ image: video });
   }
+
   requestAnimationFrame(loop);
 }
 
-function drawVR() {
+function drawResults(results) {
   const w = canvas.width;
   const h = canvas.height;
   const half = w / 2;
@@ -96,6 +115,18 @@ function drawVR() {
   // VR split-screen
   ctx.drawImage(video, 0, 0, half, h);
   ctx.drawImage(video, half, 0, half, h);
+
+  // Draw MediaPipe hands
+  if (results.multiHandLandmarks) {
+    for (const lm of results.multiHandLandmarks) {
+      drawingUtils.drawConnectors(ctx, lm, Hands.HAND_CONNECTIONS, {
+        color: "cyan", lineWidth: 4
+      });
+      drawingUtils.drawLandmarks(ctx, lm, {
+        color: "white", radius: 3
+      });
+    }
+  }
 }
 </script>
 
