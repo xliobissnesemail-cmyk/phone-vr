@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>VR Camera + MediaPipe Hands</title>
+<title>VR Camera Base</title>
 <style>
   body { margin: 0; overflow: hidden; background: black; }
 
@@ -15,7 +15,7 @@
     z-index: 0;
   }
 
-  /* Canvas overlay */
+  /* Canvas overlay for VR split-screen */
   #view {
     position: fixed;
     top: 0; left: 0;
@@ -39,15 +39,12 @@
 <body>
 
 <div id="hud">
-  <div>v2.0.0-vr-mediapipe</div>
+  <div>v1.0.1-vr-base-no-mediapipe</div>
   <div id="fps">FPS: 0</div>
 </div>
 
 <video id="cam" autoplay playsinline muted></video>
 <canvas id="view" width="1280" height="720"></canvas>
-
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
 
 <script>
 const video = document.getElementById("cam");
@@ -64,7 +61,7 @@ document.body.addEventListener("click", async () => {
     video: { facingMode: "environment" }
   });
   video.srcObject = stream;
-  startMediaPipe();
+  startLoop();
 });
 
 function updateFPS(now) {
@@ -76,36 +73,20 @@ function updateFPS(now) {
   }
 }
 
-let hands;
+function startLoop() {
+  function loop(now) {
+    updateFPS(now);
 
-function startMediaPipe() {
-  hands = new Hands({
-    locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
-  });
+    if (video.readyState >= 2) {
+      drawVR();
+    }
 
-  hands.setOptions({
-    maxNumHands: 2,
-    modelComplexity: 1,
-    minDetectionConfidence: 0.7,
-    minTrackingConfidence: 0.7
-  });
-
-  hands.onResults(drawResults);
-
-  loop();
-}
-
-function loop(now) {
-  updateFPS(now);
-
-  if (video.readyState >= 2) {
-    hands.send({ image: video });
+    requestAnimationFrame(loop);
   }
-
   requestAnimationFrame(loop);
 }
 
-function drawResults(results) {
+function drawVR() {
   const w = canvas.width;
   const h = canvas.height;
   const half = w / 2;
@@ -115,18 +96,6 @@ function drawResults(results) {
   // VR split-screen
   ctx.drawImage(video, 0, 0, half, h);
   ctx.drawImage(video, half, 0, half, h);
-
-  // Draw MediaPipe hands
-  if (results.multiHandLandmarks) {
-    for (const lm of results.multiHandLandmarks) {
-      drawingUtils.drawConnectors(ctx, lm, Hands.HAND_CONNECTIONS, {
-        color: "cyan", lineWidth: 4
-      });
-      drawingUtils.drawLandmarks(ctx, lm, {
-        color: "white", radius: 3
-      });
-    }
-  }
 }
 </script>
 
