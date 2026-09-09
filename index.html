@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>Joy-Con Button Tester</title>
+<title>Joy-Con Rotation Aiming (No Controller Model)</title>
 <style>
   body { margin: 0; overflow: hidden; background: black; }
 
@@ -40,6 +40,7 @@
 <div id="hud">
   <div id="status">Waiting for Joy-Cons...</div>
   <div id="msg">Press any button...</div>
+  <div id="aim">Rotation: yaw=0 pitch=0 roll=0</div>
 </div>
 
 <video id="cam" autoplay playsinline muted></video>
@@ -52,9 +53,13 @@ const ctx = canvas.getContext("2d");
 
 const statusEl = document.getElementById("status");
 const msgEl = document.getElementById("msg");
+const aimEl = document.getElementById("aim");
 
 let leftCon = null;
 let rightCon = null;
+
+// Rotation fallback
+let rightRot = { yaw: 0, pitch: 0, roll: 0 };
 
 // CAMERA START
 document.body.addEventListener("click", async () => {
@@ -80,7 +85,7 @@ window.addEventListener("gamepadconnected", (e) => {
   }
 });
 
-// BUTTON NAMES FOR JOY-CONS
+// BUTTON NAMES
 const joyConButtons = [
   "Button 0",
   "Button 1",
@@ -88,33 +93,60 @@ const joyConButtons = [
   "Button 3",
   "SL",
   "SR",
-  "Stick Press",
-  "Unknown",
-  "Unknown",
-  "Unknown",
-  "Unknown",
-  "Unknown"
+  "Stick Press"
 ];
 
-// READ JOY-CON BUTTONS
+// READ JOY-CONS
 function readJoyCons() {
   const pads = navigator.getGamepads();
 
   for (const pad of pads) {
     if (!pad) continue;
 
-    let side = "Unknown";
+    let side = pad.id.includes("Joy-Con (L)") ? "Left" :
+               pad.id.includes("Joy-Con (R)") ? "Right" : "Unknown";
 
-    if (pad.id.includes("Joy-Con (L)")) side = "Left";
-    if (pad.id.includes("Joy-Con (R)")) side = "Right";
-
+    // BUTTONS
     pad.buttons.forEach((btn, index) => {
       if (btn.pressed) {
         const name = joyConButtons[index] || `Button ${index}`;
         msgEl.textContent = `Button ${name} was pressed on Joy-Con ${side}`;
       }
     });
+
+    // ROTATION (if supported)
+    if (side === "Right") {
+      if (pad.pose && pad.pose.orientation) {
+        rightRot = quaternionToEuler(pad.pose.orientation);
+      } else {
+        // fallback: joystick rotates aim
+        const stickX = pad.axes[0];
+        rightRot.yaw += stickX * 0.05;
+      }
+    }
   }
+
+  aimEl.textContent =
+    `Rotation: yaw=${rightRot.yaw.toFixed(2)} pitch=${rightRot.pitch.toFixed(2)} roll=${rightRot.roll.toFixed(2)}`;
+}
+
+// QUATERNION → EULER
+function quaternionToEuler(q) {
+  const yaw = Math.atan2(
+    2 * (q.w * q.z + q.x * q.y),
+    1 - 2 * (q.y * q.y + q.z * q.z)
+  );
+
+  const pitch = Math.asin(
+    2 * (q.w * q.y - q.z * q.x)
+  );
+
+  const roll = Math.atan2(
+    2 * (q.w * q.x + q.y * q.z),
+    1 - 2 * (q.x * q.x + q.y * q.y)
+  );
+
+  return { yaw, pitch, roll };
 }
 
 // VR DRAW LOOP
@@ -128,6 +160,8 @@ function drawVR() {
   // VR split-screen camera
   ctx.drawImage(video, 0, 0, half, h);
   ctx.drawImage(video, half, 0, half, h);
+
+  // No controller model drawn
 }
 
 // MAIN LOOP
